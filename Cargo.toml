@@ -3,7 +3,29 @@ name = "jambler-simulation"
 version = "0.1.0"
 authors = ["Bhamoss <26162072+Bhamoss@users.noreply.github.com>"]
 edition = "2018"
-
+description = "Simulation, plotting and research on the theoretical formulas."
+license = "GPL-3.0-only"
+keywords = ["embedded", "no-std", "ble", "bleutooth"]
+categories = ["embedded", "no-std"]
+readme = "README.md"
+publish = false # no publishing yet
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+repository = "https://github.com/Bhamoss/jambler-simulation"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+rayon = "1.5.0"
+humantime = "2.1.0"
+plotters = "0.3.0"
+ordered-float = "2.1.1"
+chrono = "0.4.19"
+itertools = "0.10.0"
+clap = {git = "https://github.com/clap-rs/clap", version="3.0.0-beta.2", features = ["yaml"]}
+
+[dependencies.jambler]
+git = "ssh://git@github.com/Bhamoss/jambler.git"
+branch = "main"
+
+[build-dependencies]
+clap = {git = "https://github.com/clap-rs/clap", version="3.0.0-beta.2"}
+clap_generate = {git = "https://github.com/clap-rs/clap", version="3.0.0-beta.2"}
