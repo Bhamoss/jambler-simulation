@@ -20,7 +20,7 @@ _jambler-simulation() {
 
     case "${cmd}" in
         jambler__simulation)
-            opts=" -h -V -t  --help --version --task  "
+            opts=" -h -V -t -o -s  --help --version --task --output-dir --seed  "
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 1 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
@@ -28,11 +28,27 @@ _jambler-simulation() {
             case "${prev}" in
                 
                 --task)
-                    COMPREPLY=($(compgen -W "all some-task" -- "${cur}"))
+                    COMPREPLY=($(compgen -W "all channel-occurrences" -- "${cur}"))
                     return 0
                     ;;
                 -t)
-                    COMPREPLY=($(compgen -W "all some-task" -- "${cur}"))
+                    COMPREPLY=($(compgen -W "all channel-occurrences" -- "${cur}"))
+                    return 0
+                    ;;
+                --output-dir)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                -o)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                --seed)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                -s)
+                    COMPREPLY=($(compgen -f "${cur}"))
                     return 0
                     ;;
                 *)

@@ -20,8 +20,12 @@ Register-ArgumentCompleter -Native -CommandName 'jambler-simulation' -ScriptBloc
 
     $completions = @(switch ($command) {
         'jambler-simulation' {
-            [CompletionResult]::new('-t', 't', [CompletionResultType]::ParameterName, 'Print output in a format')
-            [CompletionResult]::new('--task', 'task', [CompletionResultType]::ParameterName, 'Print output in a format')
+            [CompletionResult]::new('-t', 't', [CompletionResultType]::ParameterName, 'Which tasks to run')
+            [CompletionResult]::new('--task', 'task', [CompletionResultType]::ParameterName, 'Which tasks to run')
+            [CompletionResult]::new('-o', 'o', [CompletionResultType]::ParameterName, 'Output directory')
+            [CompletionResult]::new('--output-dir', 'output-dir', [CompletionResultType]::ParameterName, 'Output directory')
+            [CompletionResult]::new('-s', 's', [CompletionResultType]::ParameterName, 'The positive seed for the simulations. Random seed if not given')
+            [CompletionResult]::new('--seed', 'seed', [CompletionResultType]::ParameterName, 'The positive seed for the simulations. Random seed if not given')
             [CompletionResult]::new('-h', 'h', [CompletionResultType]::ParameterName, 'Prints help information')
             [CompletionResult]::new('--help', 'help', [CompletionResultType]::ParameterName, 'Prints help information')
             [CompletionResult]::new('-V', 'V', [CompletionResultType]::ParameterName, 'Prints version information')

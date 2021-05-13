@@ -15,8 +15,12 @@ _jambler-simulation() {
 
     local context curcontext="$curcontext" state line
     _arguments "${_arguments_options[@]}" \
-'-t+[Print output in a format]: :(all some-task)' \
-'--task=[Print output in a format]: :(all some-task)' \
+'-t+[Which tasks to run]: :(all channel-occurrences)' \
+'--task=[Which tasks to run]: :(all channel-occurrences)' \
+'-o+[Output directory]' \
+'--output-dir=[Output directory]' \
+'-s+[The positive seed for the simulations. Random seed if not given]' \
+'--seed=[The positive seed for the simulations. Random seed if not given]' \
 '-h[Prints help information]' \
 '--help[Prints help information]' \
 '-V[Prints version information]' \
