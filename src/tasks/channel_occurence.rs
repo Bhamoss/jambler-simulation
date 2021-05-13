@@ -21,7 +21,7 @@ fn events_until_occurrence<R: Rng>(dest_dir: &std::path::Path, rng: &mut R) {
     File::create(file_path.clone()).expect("Failed to create plot file");
 
     // Do a simulation
-    let nb_unused = vec![0_u8, 5, 10, 20];
+    let nb_unused = vec![0_u8, 5, 10, 20, 30];
     const NUMBER_SIM : u32 = 1000000;
     let sims = nb_unused.iter().map(|n| (*n, ChaCha20Rng::seed_from_u64(rng.next_u64()))).collect_vec();
     let sims = sims.into_par_iter().map(|(nb_unused, mut rng)| {
@@ -80,10 +80,10 @@ fn events_until_occurrence<R: Rng>(dest_dir: &std::path::Path, rng: &mut R) {
         // enable X axis, the size is 40 px in height
         .set_label_area_size(LabelAreaPosition::Bottom, 60) // Reserves place for axis description so they dont collide with labels/ticks
         // Set title. Font and size.
-        .caption("Distribution of number of events until first occurrence", ("sans-serif", 20))
+        .caption(format!("Distribution of number of events until first occurrence for {} samples per #unused channels", NUMBER_SIM), ("sans-serif", 20))
         .margin(20)
         //.build_cartesian_2d(min..max, 0..100_000u32)
-        .build_cartesian_2d(IntoLinspace::step(0..200_u32, 1), 0.0..0.07)
+        .build_cartesian_2d(IntoLinspace::step(0..200_u32, 1), 0.0..1.0)
         //(infos.iter().map(|f| OrderedFloat::from(f.total_revenue)).max().unwrap().into_inner() * 1.1))
         .expect("Chart building failed.");
 
@@ -93,7 +93,7 @@ fn events_until_occurrence<R: Rng>(dest_dir: &std::path::Path, rng: &mut R) {
     events_chart.configure_mesh()
         //.light_line_style(&WHITE)
         .disable_x_mesh()
-        .y_desc(format!("Absolute frequency on {} samples.", NUMBER_SIM))
+        .y_desc("% not seen yet on {} samples.")
         .x_desc("Number of connection events before first channel occurrence.")
         //.set_all_tick_mark_size(20) -> the little line that come out of the graph
         .label_style(("sans-serif", 20)) // The style of the numbers on an axis
@@ -106,7 +106,11 @@ fn events_until_occurrence<R: Rng>(dest_dir: &std::path::Path, rng: &mut R) {
 
         let color = Palette99::pick(nb_unused as usize).mix(0.5);
 
-        let l = LineSeries::new(events_chart.x_range().map(|i| (i, freqs.count(&i) as f64 / NUMBER_SIM as f64)), color.stroke_width(3));
+        let l = LineSeries::new(
+            events_chart.x_range().map(|i| 
+                (i, 1.0 - ((0..=i).map(|x|freqs.count(&x)).sum::<u64>() as f64 / NUMBER_SIM as f64))
+            )
+            , color.stroke_width(3));
 
         events_chart.draw_series(
             l).unwrap()
