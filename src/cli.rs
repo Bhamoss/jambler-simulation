@@ -13,6 +13,12 @@ pub struct Args {
     /// The positive seed for the simulations. Random seed if not given.
     #[clap(long, short, takes_value = true)]
     pub seed: Option<u64>,
+    /// The physical chance of capturing a packet when a sniffer is listening for it on a channel.
+    #[clap(long, short, takes_value = true, default_value = "0.9")]
+    pub capture_chance: f64,
+    /// The number of sniffers.
+    #[clap(long, short, takes_value = true, default_value = "5")]
+    pub nb_sniffers: u8,
 }
 
 #[derive(Clap, Copy, Clone)]
@@ -21,6 +27,8 @@ pub enum SimTask {
     All,
     /// Channel occurrences
     ChannelOccurrences,
+    /// False positive recovery trick
+    ChannelRecovery,
 }
 
 //fn validate_output_dir(path:& str) -> Result<(), String> {

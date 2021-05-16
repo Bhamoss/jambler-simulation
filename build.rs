@@ -1,9 +1,10 @@
-
-
 // Is like copy past. To avoid having to make a library
 include!("src/cli.rs");
-use clap_generate::{generate_to, generators::{Bash, Elvish, Fish, PowerShell, Zsh}};
-use clap::{IntoApp};
+use clap::IntoApp;
+use clap_generate::{
+    generate_to,
+    generators::{Bash, Elvish, Fish, PowerShell, Zsh},
+};
 
 fn main() {
     let mut app = Args::into_app();

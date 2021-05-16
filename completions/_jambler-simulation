@@ -15,12 +15,16 @@ _jambler-simulation() {
 
     local context curcontext="$curcontext" state line
     _arguments "${_arguments_options[@]}" \
-'-t+[Which tasks to run]: :(all channel-occurrences)' \
-'--task=[Which tasks to run]: :(all channel-occurrences)' \
+'-t+[Which tasks to run]: :(all channel-occurrences channel-recovery)' \
+'--task=[Which tasks to run]: :(all channel-occurrences channel-recovery)' \
 '-o+[Output directory]' \
 '--output-dir=[Output directory]' \
 '-s+[The positive seed for the simulations. Random seed if not given]' \
 '--seed=[The positive seed for the simulations. Random seed if not given]' \
+'-c+[The physical chance of capturing a packet when a sniffer is listening for it on a channel]' \
+'--capture-chance=[The physical chance of capturing a packet when a sniffer is listening for it on a channel]' \
+'-n+[The number of sniffers]' \
+'--nb-sniffers=[The number of sniffers]' \
 '-h[Prints help information]' \
 '--help[Prints help information]' \
 '-V[Prints version information]' \
