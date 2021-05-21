@@ -9,6 +9,7 @@ use rand_chacha::ChaCha20Rng;
 
 pub mod channel_occurrence;
 pub mod channel_recovery;
+pub mod conn_interval;
 
 pub struct BleConnection {
     pub channel_map: u64,
@@ -33,7 +34,7 @@ impl BleConnection {
         // Channel map
         let given_nb_used = match nb_used {
             Some(n) => n,
-            None => (rng.next_u32() % 37) as u8,
+            None => rng.gen_range(1u8..=37),
         };
         let nb_unused = 37 - given_nb_used;
         // Get random channels
@@ -102,9 +103,9 @@ impl BleConnection {
     pub fn next_channel(&mut self) -> u8 {
         self.cur_event_counter = self.cur_event_counter.wrapping_add(1);
         // const 16 + 3km range random
-        let mut new_time: f64 = (16 + 24) as f64 * self.rng.gen_range(0.0..1.0);
+        //let mut new_time: f64 = (16 + 24) as f64 * self.rng.gen_range(0.0..1.0);
         let possible_drift_percentage = self.master_ppm as f64 / 1_000_000.0;
-        new_time += self.connection_interval as f64
+        let new_time = self.connection_interval as f64
             * (1.0
                 + self
                     .rng

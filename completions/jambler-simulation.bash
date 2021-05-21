@@ -28,11 +28,11 @@ _jambler-simulation() {
             case "${prev}" in
                 
                 --task)
-                    COMPREPLY=($(compgen -W "all channel-occurrences channel-recovery" -- "${cur}"))
+                    COMPREPLY=($(compgen -W "all channel-occurrences channel-recovery connection-interval" -- "${cur}"))
                     return 0
                     ;;
                 -t)
-                    COMPREPLY=($(compgen -W "all channel-occurrences channel-recovery" -- "${cur}"))
+                    COMPREPLY=($(compgen -W "all channel-occurrences channel-recovery connection-interval" -- "${cur}"))
                     return 0
                     ;;
                 --output-dir)

@@ -1,7 +1,7 @@
 use itertools::Itertools;
 use ordered_float::OrderedFloat;
 use plotters::prelude::*;
-use rand::seq::SliceRandom;
+use rand::{Rng, seq::SliceRandom};
 use rand::{RngCore, SeedableRng};
 use rand_chacha::ChaCha20Rng;
 use rayon::prelude::*;
@@ -14,8 +14,11 @@ use statrs::{distribution::Univariate, statistics::Mean};
 use std::f64;
 
 use crate::{SimulationParameters, Task, run_tasks, tasks::BleConnection};
+use jambler::ble_algorithms::csa2::{csa2_no_subevent, generate_channel_map_arrays};
 
 
+use std::sync::{Arc, Mutex};
+use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 
 // TODO morgen: JE BENT ER BIJNA!!!!!
 // TODO Doe bovenstaande als simulatie: voor de nb_used = 37 - *nb_unused_seen + nb_false_negs
@@ -58,7 +61,7 @@ use crate::{SimulationParameters, Task, run_tasks, tasks::BleConnection};
 // which has the lowest sum of "bars" (#FNs) for which the bar is above 10%.
 
 
-pub fn channel_recovery<R: RngCore + Send + Sync>(mut params: SimulationParameters<R>) {
+pub fn channel_recovery<R: RngCore + Send + Sync>(mut params: SimulationParameters<R>, bars: Arc<Mutex<MultiProgress>>) {
     params.output_dir.push("channel_recovery");
     create_dir_all(&params.output_dir).unwrap();
     let tasks: Vec<Box<dyn Task>> = vec![
@@ -71,8 +74,9 @@ pub fn channel_recovery<R: RngCore + Send + Sync>(mut params: SimulationParamete
         Box::new(thressholds),
         // TODO uncomment, takes to much time
         //Box::new(with_capture_chance),
-    ]; // thressholds
-    run_tasks(tasks, params);
+        //Box::new(chm_sim),
+    ]; // chm_sim
+    run_tasks(tasks, params, bars);
 }
 #[derive(Clone)]
 struct Occ {
@@ -119,7 +123,7 @@ fn chance_and_combo_reality(nb_unused_seen: u8, nb_false_negs: u8, nb_events: u8
 }
 
 
-fn false_negative_chance_vs_combinations<R: RngCore + Send + Sync>(params: SimulationParameters<R>) {
+fn false_negative_chance_vs_combinations<R: RngCore + Send + Sync>(params: SimulationParameters<R>, _bars: Arc<Mutex<MultiProgress>>) {
 
     let mut file_path = params.output_dir;
     let mut rng = params.rng;
@@ -356,7 +360,7 @@ fn false_negative_chance_vs_combinations<R: RngCore + Send + Sync>(params: Simul
             .unwrap();
     });
 }
-fn false_negatives<R: RngCore + Send + Sync>(params: SimulationParameters<R>) {
+fn false_negatives<R: RngCore + Send + Sync>(params: SimulationParameters<R>, _bars: Arc<Mutex<MultiProgress>>) {
     let mut file_path = params.output_dir;
     let mut rng = params.rng;
     file_path.push("false_negatives.png");
@@ -607,7 +611,7 @@ fn false_neg_med_conf(nb_used: u8, misclassify_chance: f64, alpha: f64) -> (f64,
 
 
 
-fn thressholds<R: RngCore + Send + Sync>(params: SimulationParameters<R>) {
+fn thressholds<R: RngCore + Send + Sync>(params: SimulationParameters<R>, _bars: Arc<Mutex<MultiProgress>>) {
     let file_path = params.output_dir;
     let mut rng = params.rng;
     let mut together_error_path = file_path.clone();
@@ -817,7 +821,7 @@ fn thressholds<R: RngCore + Send + Sync>(params: SimulationParameters<R>) {
            
 }
 
-fn with_capture_chance<R: RngCore + Send + Sync>(params: SimulationParameters<R>)  {
+fn with_capture_chance<R: RngCore + Send + Sync>(params: SimulationParameters<R>, _bars: Arc<Mutex<MultiProgress>>)  {
 
     let mut file_path = params.output_dir;
     let mut rng = params.rng;
@@ -924,6 +928,481 @@ fn with_capture_chance<R: RngCore + Send + Sync>(params: SimulationParameters<R>
 }
 
 
+
+fn chm_sim<R: RngCore + Send + Sync>(params: SimulationParameters<R>, bars: Arc<Mutex<MultiProgress>>)  {
+
+    const NUMBER_SIMS : u32 = 100;
+
+    let mut file_path = params.output_dir;
+    let mut rng = params.rng;
+    file_path.push(format!("chm_sim_{}", NUMBER_SIMS));
+    create_dir_all(file_path.clone()).expect("Failed to create plot directory");
+    let mut error_path = file_path.clone();
+    error_path.push("error");
+    create_dir_all(error_path.clone()).expect("Failed to create plot directory");
+    let mut bf_path = file_path.clone();
+    bf_path.push("number_brute_forces");
+    create_dir_all(bf_path.clone()).expect("Failed to create plot directory");
+    let mut extra_path = file_path;
+    extra_path.push("number_extra_packets");
+    create_dir_all(extra_path.clone()).expect("Failed to create plot directory");
+
+
+
+    let max_bfs_feasable = vec![100];
+    let max_error_rates = vec![0.1f64];
+    let physical_error_rates = vec![0.1f64];
+
+    let nt = NUMBER_SIMS as usize * 36 * max_bfs_feasable.len() * max_error_rates.len() * physical_error_rates.len();
+
+    // make new progress bar
+    let pb = bars.lock().unwrap().add(ProgressBar::new(nt as u64));
+    pb.set_style(ProgressStyle::default_bar()
+    .template("{spinner:.green} [{elapsed_precise}] [{wide_bar:.cyan/blue}] {pos}/{len} ({eta}) {msg}")
+    .progress_chars("#>-"));
+    let pb = Mutex::new(pb);
+
+    let todo = Mutex::new((2u8..38).collect_vec());
+
+    let plots = max_bfs_feasable.into_iter().cartesian_product(max_error_rates.into_iter().cartesian_product(physical_error_rates.into_iter()))
+    .map(|(b, (e, p))| (b, e, p,ChaCha20Rng::seed_from_u64(rng.next_u64()))).collect_vec();
+    plots.into_par_iter().for_each(|(bfs_max, max_error, packet_loss,mut rng)| {
+
+        // calculate number of events to wait and the thresshold
+        let es = 50u8..=255;
+        // For the given brute force max, find the lowest number of events for which a thresshold exists, for which the max error is lower than the given one
+        // Brute force this for now
+        let found = es.filter_map(|nb_events| {
+            // Get allowed threshes
+            let threshes = (1..100).map(|i| 0.01 * i as f64);
+            let bf_threshes = threshes.skip_while(|thresshold| {
+                // Check if this would go over the BF thresh
+                // Max over nb_unused -> this is the observed
+                let nbu = (0u8..37).map(|nb_unused_seen| 
+                    // Sum combo all above thresshold for the nb of false negatives it would be for this nb of unused
+                    (0u8..=nb_unused_seen).map(|nb_false_neg| chance_and_combo_reality(nb_unused_seen, nb_false_neg,nb_events, 1.0 - packet_loss))
+                    .filter(|(fn_chance, _)| *fn_chance >= *thresshold).map(|(_, bfs)| bfs).sum::<u64>()
+                ).max();
+                if let Some(bfs) = nbu {
+                    //if bfs > bfs_max && *thresshold > 0.1 {
+                    //    println!("Too much {:.2} {}", *thresshold, bfs)
+                    //}
+                    bfs > bfs_max
+                }
+                else {
+                    println!("Invalid");
+                    false
+                }}
+            ).collect_vec();
+
+            // Check if any of these thresses are below the max error
+            // rev() does not really matter, it just has to have 1 satisfying, the lower the sooner it is found
+            let found = bf_threshes.into_iter().rev().find(|thresshold| {
+                    // Max over nb_used -> this is the unknown
+                    let err =(1u8..=37).map(|nb_used| 
+                        // Sum all below thresshold for the nb of false negatives possible
+                        (0u8..=nb_used).map(|nb_false_neg| chance_and_combo_reality(37 -nb_used + nb_false_neg, nb_false_neg,nb_events, 1.0 - packet_loss).0)
+                        .filter(|fn_chance| *fn_chance < *thresshold).sum::<f64>()
+                    ).map(OrderedFloat::from).max();
+                    if let Some(err) = err {
+                        err.into_inner() <= max_error
+                    }
+                    else {
+                        false
+                    }
+            });
+            found.map(|thress| (nb_events, thress))
+        }).next();
+
+        if let Some((events, thress)) = found {
+
+            println!("Simulating {} bfs {:.2} err {:.} pl with {} events and {:.2} thress",  bfs_max, max_error, packet_loss, events, thress);
+
+            // simulate for every possible real used
+            let sims = (2u8..=37).map(|i| (i, ChaCha20Rng::seed_from_u64(rng.next_u64()))).collect_vec();
+            // Contains (actual_nb_used, vec over simulation with ((success, not no_solution), nb_bfs, extra_packets after channel map))
+            let sims = sims.into_par_iter().map(|(nb_used, mut rng)|{
+                let dist =  Geometric::new((1.0-packet_loss)*(1.0/nb_used as f64)).unwrap();
+                let capture_chance = dist.cdf(events as f64 + 0.5);
+
+
+                let sims = (0..NUMBER_SIMS).map(|i| (i, ChaCha20Rng::seed_from_u64(rng.next_u64()))).collect_vec();
+                let resses = sims.into_par_iter().map(|(_ns, mut rng)| {
+                    // gen random connection
+                    let mut connection = BleConnection::new(&mut rng, Some(nb_used as u8));
+                    // Get a random channels sequence to do
+                    let mut channels = connection.chm.to_vec().into_iter().enumerate().map(|(c, used)| Occ{ channel: c as u8, used}).collect_vec(); // (channel, is_used)
+                    channels.shuffle(&mut rng);
+
+                    // Simulate the channel map stage                        
+                    let mut observerd_packets = channels.into_iter().filter_map(|occ| 
+                        if occ.used {(0..events).filter_map(|_|
+                            // If any is captured and the channel is the channel it is not unused -> negate this -> !(..)any
+                            if connection.next_channel() == occ.channel && rng.gen_range(0.0..1.0) <= capture_chance {
+                                Some((connection.cur_event_counter, connection.cur_channel))
+                            } else {None}).next()} // short circuit first channel occurrence
+                        else {(0..events).for_each(|_| {connection.next_channel();}); None} // let connection jump events_to_wait
+                        ).collect_vec();
+
+                    // Put them from the relative offset
+                    let relative_event_offset = observerd_packets.first().unwrap().0;
+                    observerd_packets.iter_mut().for_each(|p| p.0 = (p.0).wrapping_sub(relative_event_offset));
+                    // Get channel map
+                    let chm = observerd_packets.iter().fold(0u64, |chm, (_, channel)| chm | (1 << *channel));
+                    let (channel_map_bool_array,_, _, nb_used_observed) =  generate_channel_map_arrays(chm);
+                    let observed_used = (0u8..37).filter(|c| channel_map_bool_array[*c as usize]).collect_vec();
+
+                    // brute force and wait for new packets as long as you have no single solution
+                    let mut extra_packets = 0u32;
+                    let mut result = brute_force(extra_packets, bfs_max, nb_used, connection.channel_map, relative_event_offset,observerd_packets.as_slice(), chm, thress, events, packet_loss, connection.channel_id);
+                    while let CounterInterval::MultipleSolutions = &result.0 {
+                        // Get extra packet
+                        extra_packets += 10;
+                        // Get random next channel to listen for extra packet
+                        let channel = observed_used[rng.gen_range(0..observed_used.len())];
+                        // Listen until you hear one
+                        let mut next_one = (0..).map(|_| {connection.next_channel(); (connection.cur_event_counter.wrapping_sub(relative_event_offset), connection.cur_channel)}).filter(|c| c.1 == channel  && rng.gen_range(0.0..1.0) <= capture_chance).take(10).collect_vec();
+                        // Add to observed
+                        observerd_packets.append(&mut next_one);
+
+                        //if nb_used == 37 && extra_packets > 50 {println!("Large packets {} for {}", extra_packets, nb_used)};
+
+                        // Brute force again
+                        result = brute_force(extra_packets, bfs_max, nb_used, connection.channel_map, relative_event_offset, observerd_packets.as_slice(), chm, thress, events, packet_loss, connection.channel_id);
+
+                    }
+
+                    //if nb_used == 37 { println!("Completed sim {} of {} for {}: {:?} {}", ns, NUMBER_SIMS, nb_used, &result, extra_packets)};
+                    //if let Ok(p) = pb.lock() { p.inc(1); p.set_message(format!("{}", nb_used)) }
+                    if let CounterInterval::ExactlyOneSolution(first_packet_actual_counter, found_chm) = &result.0 {
+                        (((*first_packet_actual_counter == relative_event_offset && connection.channel_map == *found_chm), true), result.1, extra_packets, nb_used - nb_used_observed)
+                    }
+                    else {
+                        ((false,false), result.1, extra_packets, nb_used - nb_used_observed)
+                    }
+                }).collect::<Vec<_>>();
+                todo.lock().unwrap().retain(|x| *x != nb_used);
+                println!("{:?} todo", todo.lock().unwrap());
+                (nb_used, resses)
+            }).collect::<Vec<_>>();
+
+            let mut error_path = error_path.clone();
+            error_path.push(format!("sim_err_{}bfs_{:.2}err_{:.}pl.png",  bfs_max, max_error, packet_loss));
+            File::create(error_path.clone()).expect("Failed to create plot file");
+            let mut bf_path = bf_path.clone();
+            bf_path.push(format!("sim_bf_{}bfs_{:.2}err_{:.}pl.png",  bfs_max, max_error, packet_loss));
+            File::create(bf_path.clone()).expect("Failed to create plot file");
+            let mut extra_path = extra_path.clone();
+            extra_path.push(format!("sim_extra_{}bfs_{:.2}err_{:.}pl.png",  bfs_max, max_error, packet_loss));
+            File::create(extra_path.clone()).expect("Failed to create plot file");
+
+
+            // return 3 iterators with the boxlots
+            let (successes, b): (Vec<_>, Vec<_>) = sims.into_iter().map(|(nb_used, data)| {
+
+                println!("\n\n{} used", nb_used);
+                
+
+                #[allow(clippy::type_complexity)]
+                let (successes,(no_sols, (bfs, (extra, fns)))): (Vec<_>, (Vec<_>, (Vec<_>, (Vec<_>, Vec<_>)))) = data.into_par_iter().inspect(|d| println!("{:?}", d)).map(|d| (d.0.0,(!d.0.1, (d.1, (d.2, d.3))))).unzip();
+
+                println!("{} success {} no sol", successes.iter().filter(|s| **s).count() as f64 / NUMBER_SIMS as f64, no_sols.iter().filter(|s| **s).count() as f64 / NUMBER_SIMS as f64);
+                println!("\n\nsuccesses\n{:?}\n\nno_sols\n{:?}\n\nbfs\n{:?}\n\nextra\n{:?}\n\nfns\n{:?}", &successes, &no_sols, &bfs, &extra, &fns);
+
+                let successes = successes.into_iter().filter(|b| *b).count() as f64 / NUMBER_SIMS as f64;
+                let bfs_quarts = Quartiles::new(bfs.as_slice());
+                let extra_quarts = Quartiles::new(extra.as_slice());
+                let fns_quarts = Quartiles::new(&fns);
+
+                ( (nb_used, successes), (
+                    Boxplot::new_vertical(SegmentValue::CenterOf(nb_used as u32), &bfs_quarts),
+                    (Boxplot::new_vertical(SegmentValue::CenterOf(nb_used as u32), &extra_quarts), Boxplot::new_vertical(nb_used as u32, &fns_quarts))
+                ))
+            }).unzip();
+            let (bfs, e) : (Vec<_>, Vec<_>) = b.into_iter().unzip();
+            let (extras, fns) : (Vec<_>, Vec<_>) = e.into_iter().unzip();
+
+            const HEIGHT: u32 = 1080;
+            const WIDTH: u32 = 1080; // was 1920
+
+            // Successes/errors
+            let root_area = BitMapBackend::new(error_path.as_path(), (WIDTH, HEIGHT)).into_drawing_area();
+            root_area.fill(&WHITE).unwrap();
+            let mut events_chart = ChartBuilder::on(&root_area)
+                .set_label_area_size(LabelAreaPosition::Left, 120)
+                .set_label_area_size(LabelAreaPosition::Bottom, 60)
+                .caption(format!("sim errors: {} max feasable brute force {:.2}% max error with {:.}% packet loss: {} events {:.2} thress", bfs_max, max_error, packet_loss, events, thress), ("sans-serif", 20))
+                .margin(20)
+                .right_y_label_area_size(80)
+                .build_cartesian_2d(1..38u32, 0.0..1.05f32)
+                .expect("Chart building failed.")
+                .set_secondary_coord(1..38u32, 0.0..10.05f32); 
+            events_chart
+                .configure_mesh()
+                .disable_x_mesh()
+                .y_desc("Error rate")
+                .x_desc("Actual used channels")
+                .label_style(("sans-serif", 20)) // The style of the numbers on an axis
+                .axis_desc_style(("sans-serif", 20))
+                .draw()
+                .unwrap();
+            events_chart.configure_secondary_axes()
+                .y_desc("False negatives")
+                .label_style(("sans-serif", 20)) // The style of the numbers on an axis
+                .axis_desc_style(("sans-serif", 20))
+                .draw().unwrap();
+            let o = LineSeries::new(
+                successes.into_iter().map(|(nb_used, succ)| (nb_used as u32, 1.0 - succ as f32)),
+                RED.to_rgba().stroke_width(3));
+            events_chart.draw_series(o).unwrap();
+            events_chart.draw_secondary_series(fns).unwrap();
+
+            // BFS
+            let root_area = BitMapBackend::new(bf_path.as_path(), (WIDTH, HEIGHT)).into_drawing_area();
+            root_area.fill(&WHITE).unwrap();
+            let mut events_chart = ChartBuilder::on(&root_area)
+                .set_label_area_size(LabelAreaPosition::Left, 120)
+                .set_label_area_size(LabelAreaPosition::Bottom, 60)
+                .caption(format!("sim brute forces: {} max feasable brute force {:.2}% max error with {:.}% packet loss: {} events {:.2} thress", bfs_max, max_error, packet_loss, events, thress), ("sans-serif", 20))
+                .margin(20)
+                .build_cartesian_2d((1..38u32).into_segmented(), 0.0..(bfs_max as f32 + 5.0))
+                .expect("Chart building failed.");
+            events_chart
+                .configure_mesh()
+                .disable_x_mesh()
+                .y_desc("Brute forces")
+                .x_desc("Actual used channels")
+                .label_style(("sans-serif", 20)) // The style of the numbers on an axis
+                .axis_desc_style(("sans-serif", 20))
+                .draw()
+                .unwrap();
+            events_chart.draw_series(bfs).unwrap();
+
+
+            // extras
+            let root_area = BitMapBackend::new(extra_path.as_path(), (WIDTH, HEIGHT)).into_drawing_area();
+            root_area.fill(&WHITE).unwrap();
+            let mut events_chart = ChartBuilder::on(&root_area)
+                .set_label_area_size(LabelAreaPosition::Left, 120)
+                .set_label_area_size(LabelAreaPosition::Bottom, 60)
+                .caption(format!("sim extras: {} max feasable brute force {:.2}% max error with {:.}% packet loss: {} events {:.2} thress", bfs_max, max_error, packet_loss, events, thress), ("sans-serif", 20))
+                .margin(20)
+                .build_cartesian_2d((1..38u32).into_segmented(), 0.0..1000.0f32)
+                .expect("Chart building failed.");
+            events_chart
+                .configure_mesh()
+                .disable_x_mesh()
+                .y_desc("Extra packets after channel map phase")
+                .x_desc("Actual used channels")
+                .label_style(("sans-serif", 20)) // The style of the numbers on an axis
+                .axis_desc_style(("sans-serif", 20))
+                .draw()
+                .unwrap();
+            events_chart.draw_series(extras).unwrap();
+        }
+    });
+}
+
+#[allow(clippy::too_many_arguments)]
+fn brute_force(extra_packets: u32 ,bf_max: u64,actual_nb_used_debug :u8, actual_chm_debug : u64, actual_counter_debug : u16, packets : &[(u16, u8)], chm : u64, thresshold: f64, nb_events: u8, packet_loss: f64, channel_id: u16) -> (CounterInterval, u32) {
+    //if actual_nb_used_debug == 37 { println!("bf for {} {} {}", actual_nb_used_debug, actual_counter_debug, actual_chm_debug)};
+    let nb_unused_seen = (0u8..37).filter(|channel| chm & (1 << *channel) == 0).count() as u8;
+    // Get the false positives for which the chance of it occurring is above the thresshold
+    let likely_false_negatives = (0..=nb_unused_seen)
+        .filter(|fns| chance_and_combo_reality(nb_unused_seen, *fns,nb_events, 1.0 - packet_loss).0 >= thresshold).collect_vec();
+
+        // TODO turn as much as you can of this into iterators so rust can optimise the hell out of it
+
+    let (channel_map_bool_array,_, _, _) =
+        generate_channel_map_arrays(chm);
+
+    let unused_channels = channel_map_bool_array.iter().enumerate().filter_map(|(channel, seen)| if !*seen {Some(channel as u8)} else {None}).collect_vec();
+    let mut nb_bfs = 0u32;
+    let results = likely_false_negatives.into_iter().map(|nb_false_negs| {
+        
+        //let nb_used = 37 - nb_unused_seen + nb_false_negs;
+        //let mut is_false_neg = unused_channels.iter().map(|_| false).collect_vec();
+        //is_false_neg.iter_mut().zip(0..nb_false_negs).for_each(|(is_false_neg, _)| *is_false_neg = true);
+        //let nb_unused = nb_unused_seen - nb_false_negs;
+        // permutation takes K elements from the iterator and gives a vector for each combination of k element of the iterator
+        // Taking nb_unused_seen - false_nges is same as deleting false_negs
+        let combinations = unused_channels.clone().into_iter().combinations(nb_false_negs as usize).collect_vec();
+        let chms = combinations.clone().into_iter().map(|to_flip| {
+        unused_channels.iter().fold(0x1F_FF_FF_FF_FFu64, |chm, channel|{
+                if !to_flip.contains(channel) {
+                    // turn of if now flipped to used
+                    chm & !(1 << *channel)
+                }
+                else {
+                    chm
+                }
+            })
+        }).collect_vec();
+        let _nb_u = actual_nb_used_debug;
+        let b = binomial(nb_unused_seen as u64, nb_false_negs as u64).round() as usize;
+        if b != chms.len() {
+            panic!("{} {:?}", b, combinations)
+        }
+        let fn_solutions = chms.into_iter().map(|chm|{
+            let (channel_map_bool_array,remapping_table, _, nb_used) =  generate_channel_map_arrays(chm);
+
+            nb_bfs += 1;
+            if nb_bfs > bf_max as u32 {
+                panic!("More bfs than allowed")
+            }
+            // now we have concrete channel map as before
+            let mut running_event_counter;
+
+            let mut found_counter: Option<u32> = None;
+            let mut inconsistency: bool;
+            for potential_counter in 0..=u16::MAX {
+                // reset inconsistency
+                inconsistency = false;
+                for (relative_counter, channel) in packets.iter() {
+                    running_event_counter =  potential_counter.wrapping_add(*relative_counter);
+                    let channel_potential_counter = csa2_no_subevent(
+                        running_event_counter as u32,
+                        channel_id as u32,
+                        &channel_map_bool_array,
+                        &remapping_table,
+                        nb_used,
+                    );
+
+                    // If we get another one than expected, go to next counter
+                    if channel_potential_counter != *channel {
+                        inconsistency = true;
+                        if potential_counter == actual_counter_debug && chm == actual_chm_debug {
+                            panic!("Correct counter and channel map but inconsistency")
+                        }
+                        break;
+                    }
+                }
+
+
+                // If there was no inconsistency for this potential counter save it
+                if !inconsistency {
+                    match found_counter {
+                        None => {
+                            // the first one without inconsistency, save it
+                            found_counter = Some(potential_counter as u32);
+                        }
+                        Some(_) => {
+                            // There was already another one without inconstistency, we have multiple solutions
+                            return CounterInterval::MultipleSolutions;
+                        }
+                    }
+                }
+            }
+
+            // The fact we get here, we did not find mutliple solutions, must be one or none.
+            // Remember for exactly one you need to run through the whole range
+            match found_counter {
+                None => {
+                    // There were no solutions
+                    if chm == actual_chm_debug {
+                        panic!("No solution but have actual channel map")
+                    }
+                    CounterInterval::NoSolutions
+                }
+                Some(counter) => 
+                    CounterInterval::ExactlyOneSolution(counter as u16, chm),
+            }
+        }).collect_vec();
+        (nb_false_negs, fn_solutions)
+    }).collect_vec();
+
+    if extra_packets > 1000 {
+        if results.iter().map(|(_f,v)| v).flatten().any(|x| matches!(x, CounterInterval::MultipleSolutions)) {
+            println!("Multiple solution for 1 chm after 1000")
+        }
+        println!("{} #FNs with multple exaclty ones for their channel map combinations, {} used", results.iter().filter(|r_of_fn| r_of_fn.1.iter().filter(|x| matches!(x, CounterInterval::ExactlyOneSolution(_, _))).count() > 1).count(), actual_nb_used_debug);
+        println!("{} #FNs with an exaclty one for their channel map combinations, {} used", results.iter().filter(|r_of_fn| r_of_fn.1.iter().any(|x| matches!(x, CounterInterval::ExactlyOneSolution(_, _)))).count(), actual_nb_used_debug);
+
+        println!("nb_used FNs counter map");
+        results.iter().for_each(|(f, sols)| 
+        sols.iter().filter_map(|x| if let CounterInterval::ExactlyOneSolution(c, m) = x {Some((*c, *m))} else {None})
+        .for_each(|(c,m)| println!("{:2} {:2} {:5} {:037b}", actual_nb_used_debug,  *f, c, m)));
+
+        panic!("too much")
+    }
+
+    // When actually false positives, for the same counter all channel maps
+    // for all #FNs for which exactly a subset of the false positives are set to unused:
+    // All of these will pass (a number of Combinations of this will pass):
+    /* (nb_used #FNs counter chm)
+    37  0 42085 1111111111111111101111111111111100111
+    37  1 42085 1111111111111111101111111111111101111
+    37  1 42085 1111111111111111101111111111111110111
+    37  1 42085 1111111111111111111111111111111100111
+    37  2 42085 1111111111111111101111111111111111111
+    37  2 42085 1111111111111111111111111111111101111
+    37  2 42085 1111111111111111111111111111111110111
+    37  3 42085 1111111111111111111111111111111111111
+        */
+    // Because exactly the false negatives that would solve this have no representation in the seen packets
+
+    // Fold for all number of false positives
+    let results = results.into_iter().map(|(_f,v)| v.into_iter().fold(CounterInterval::NoSolutions, |cur, this|{
+        match &cur {
+            CounterInterval::ExactlyOneSolution(c, m) => {
+                match this {
+                    CounterInterval::ExactlyOneSolution(tc, tm) => {
+                        if tc == *c {
+                            // For same counters, or them = take union of used channels
+                            // Later on we will require the union to be exactly the same for all numbers of false positives
+                            CounterInterval::ExactlyOneSolution(tc, tm | *m)
+                        }
+                        else {
+                            CounterInterval::MultipleSolutions
+                        }
+                    }
+                    CounterInterval::MultipleSolutions => {CounterInterval::MultipleSolutions}
+                    CounterInterval::NoSolutions => {cur}
+                }
+            }
+            CounterInterval::MultipleSolutions => {CounterInterval::MultipleSolutions}
+            CounterInterval::NoSolutions => {this}
+        }
+    })).collect_vec();
+
+    let end_result = results.into_iter().fold(CounterInterval::NoSolutions, |cur, this|{
+        match &cur {
+            CounterInterval::ExactlyOneSolution(c, m) => {
+                match this {
+                    CounterInterval::ExactlyOneSolution(tc, tm) => {
+                        // now require them to be exactly the same -> Wrong e.g. 0 fns wont have this
+                        assert!((*m).count_ones() <= tm.count_ones());
+                        if tc == *c && !tm & *m == 0 {
+                            // For same counters, or them = take union of used channels
+                            // Later on we will require the union to be exactly the same for all numbers of false positives
+                            CounterInterval::ExactlyOneSolution(tc, tm)
+                        }
+                        else {
+                            CounterInterval::MultipleSolutions
+                        }
+                    }
+                    CounterInterval::MultipleSolutions => {CounterInterval::MultipleSolutions}
+                    CounterInterval::NoSolutions => {cur}
+                }
+            }
+            CounterInterval::MultipleSolutions => {CounterInterval::MultipleSolutions}
+            CounterInterval::NoSolutions => {this}
+        }
+        
+    });
+    
+    //if actual_nb_used_debug == 37 { println!("bf DONE for {} {} {}", actual_nb_used_debug, actual_counter_debug, actual_chm_debug)};
+    (end_result, nb_bfs)
+}
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum CounterInterval {
+    /// Acceptable end state if it is the only one.
+    ExactlyOneSolution(u16, u64),
+    /// Indicates there were mutliple solutions and we need more information
+    MultipleSolutions,
+    /// If no solution for any slice error. Otherwise ok.
+    NoSolutions,
+}
 
 /*
 /// Number of extra brute forces next to normal event counter brute force necessary

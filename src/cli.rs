@@ -29,6 +29,7 @@ pub enum SimTask {
     ChannelOccurrences,
     /// False positive recovery trick
     ChannelRecovery,
+    ConnectionInterval,
 }
 
 //fn validate_output_dir(path:& str) -> Result<(), String> {

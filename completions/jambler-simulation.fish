@@ -1,4 +1,4 @@
-complete -c jambler-simulation -s t -l task -d 'Which tasks to run' -r -f -a "all channel-occurrences channel-recovery"
+complete -c jambler-simulation -s t -l task -d 'Which tasks to run' -r -f -a "all channel-occurrences channel-recovery connection-interval"
 complete -c jambler-simulation -s o -l output-dir -d 'Output directory' -r
 complete -c jambler-simulation -s s -l seed -d 'The positive seed for the simulations. Random seed if not given' -r
 complete -c jambler-simulation -s c -l capture-chance -d 'The physical chance of capturing a packet when a sniffer is listening for it on a channel' -r

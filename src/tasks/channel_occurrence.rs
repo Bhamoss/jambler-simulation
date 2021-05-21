@@ -1,3 +1,4 @@
+use indicatif::MultiProgress;
 use itertools::Itertools;
 use jambler::ble_algorithms::{
     access_address::is_valid_aa,
@@ -9,11 +10,11 @@ use rand::{Rng, RngCore, SeedableRng};
 use rand_chacha::ChaCha20Rng;
 use rayon::prelude::*;
 use stats::Frequencies;
-use std::fs::{create_dir_all, File};
+use std::{fs::{create_dir_all, File}, sync::{Arc, Mutex}};
 
 use crate::{run_tasks, SimulationParameters, Task};
 
-pub fn channel_occurrences<R: RngCore + Send + Sync>(mut params: SimulationParameters<R>) {
+pub fn channel_occurrences<R: RngCore + Send + Sync>(mut params: SimulationParameters<R>, bars: Arc<Mutex<MultiProgress>>) {
     params.output_dir.push("channel_occurrences");
     create_dir_all(&params.output_dir).unwrap();
     let tasks: Vec<Box<dyn Task>> = vec![
@@ -22,10 +23,10 @@ pub fn channel_occurrences<R: RngCore + Send + Sync>(mut params: SimulationParam
         Box::new(error_by_wait),
         Box::new(error_by_wait_imperfect),
     ];
-    run_tasks(tasks, params);
+    run_tasks(tasks, params, bars);
 }
 
-fn events_until_occurrence<R: RngCore + Send + Sync>(params: SimulationParameters<R>) {
+fn events_until_occurrence<R: RngCore + Send + Sync>(params: SimulationParameters<R>, _bars: Arc<Mutex<MultiProgress>>) {
     // TODO plot boxplots on this and theoretical as a couple of crosses which should fall on the graph
 
     let mut file_path = params.output_dir;
@@ -204,7 +205,7 @@ fn events_until_occurrence<R: RngCore + Send + Sync>(params: SimulationParameter
         .unwrap();
 }
 
-fn events_until_occurrence_imperfect<R: RngCore + Send + Sync>(params: SimulationParameters<R>) {
+fn events_until_occurrence_imperfect<R: RngCore + Send + Sync>(params: SimulationParameters<R>, _bars: Arc<Mutex<MultiProgress>>) {
     // TODO plot boxplots on this and theoretical as a couple of crosses which should fall on the graph
 
     let mut file_path = params.output_dir.clone();
@@ -399,7 +400,7 @@ fn events_until_occurrence_imperfect<R: RngCore + Send + Sync>(params: Simulatio
         .unwrap();
 }
 
-fn error_by_wait<R: RngCore + Send + Sync>(params: SimulationParameters<R>) {
+fn error_by_wait<R: RngCore + Send + Sync>(params: SimulationParameters<R>, _bars: Arc<Mutex<MultiProgress>>) {
     // TODO plot boxplots on this and theoretical as a couple of crosses which should fall on the graph
 
     let mut file_path = params.output_dir;
@@ -630,7 +631,7 @@ fn error_by_wait<R: RngCore + Send + Sync>(params: SimulationParameters<R>) {
         .unwrap();
 }
 
-fn error_by_wait_imperfect<R: RngCore + Send + Sync>(params: SimulationParameters<R>) {
+fn error_by_wait_imperfect<R: RngCore + Send + Sync>(params: SimulationParameters<R>, _bars: Arc<Mutex<MultiProgress>>) {
     // TODO plot boxplots on this and theoretical as a couple of crosses which should fall on the graph
 
     let mut file_path = params.output_dir;
