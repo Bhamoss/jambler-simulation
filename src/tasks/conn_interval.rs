@@ -4,7 +4,7 @@ use rand::{Rng, seq::SliceRandom};
 use rand::{RngCore, SeedableRng};
 use rand_chacha::ChaCha20Rng;
 use rayon::prelude::*;
-use std::{fs::{create_dir_all, File}, iter::once, mem::needs_drop, ops::RangeBounds};
+use std::{cmp::{max, min}, fs::{create_dir_all, File}, iter::once, mem::needs_drop, ops::RangeBounds};
 
 use statrs::distribution::{Binomial, Erlang, Geometric, Hypergeometric};
 use statrs::{distribution::Univariate, statistics::Mean};
@@ -25,15 +25,18 @@ pub fn conn_interval<R: RngCore + Send + Sync>(mut params: SimulationParameters<
     params.output_dir.push("conn_interval");
     create_dir_all(&params.output_dir).unwrap();
     let tasks: Vec<Box<dyn Task>> = vec![
+        /*
         Box::new(gcd_sim),
         Box::new(too_much_drift),
         Box::new(bates_cdf_plot),
         Box::new(bates_necessary_n),
         Box::new(one_interval_delta),
         Box::new(one_interval_delta_necessary_packets),
-        Box::new(conn_interval_sim),
+        */
+        //Box::new(conn_interval_sim),
+        Box::new(conn_interval_only_gcd_sim),
         //Box::new(time_boxplots_per_nb_used),
-    ]; // conn_interval_sim
+    ]; // conn_interval_only_gcd_sim
     run_tasks(tasks, params, bars);
 }
 
@@ -883,14 +886,201 @@ fn one_interval_delta_necessary_packets<R: RngCore + Send + Sync>(params: Simula
 }
 
 
+fn conn_interval_only_gcd_sim<R: RngCore + Send + Sync>(params: SimulationParameters<R>, bars: Arc<Mutex<MultiProgress>>) {
+    let mut file_path = params.output_dir;
+    let mut rng = params.rng;
+    file_path.push("conn_interval_only_gcd_sim.png");
+
+    const NUMBER_SIMS : u32 = 10000;
+    const CAPTURE_CHANCE: f64 = 0.02;
+    const STEP : usize = 20;
+
+    let gdc_thresses = (0u8..=5).collect_vec();
+
+
+    File::create(file_path.clone()).expect("Failed to create plot file");
+
+    //let todo = Mutex::new(NUMBER_SIMS);
+    //println!("voor simulatie");
+    // Do a simulations
+
+    let sims = gdc_thresses.into_iter().map(|i| (i,ChaCha20Rng::seed_from_u64(rng.next_u64()))).collect_vec();
+
+    let sims = sims
+        .into_par_iter()
+        .map(| (gcd_thress, mut rng)| {
+
+        
+
+        let sims = (7500u32..(ROUND_THRESS as u32 - 1250)).step_by(1250 * STEP).map(|i| (i,ChaCha20Rng::seed_from_u64(rng.next_u64())))
+            .collect_vec();
+            
+        let sims = sims
+            .into_par_iter()
+            .map(| (conn_interval, mut rng)| {
+                let res = (0..NUMBER_SIMS).map(|_| {
+                    // gen random connection
+                    let mut connection = BleConnection::new(&mut rng, None);
+                    connection.connection_interval = conn_interval;
+
+                    // packet stream
+                    let mut packet_stream = (1..).map(|_| {connection.next_channel(); connection.cur_time}).filter(|_| rng.gen_range(0.0..1.0) <= CAPTURE_CHANCE);
+                    // Get initial packet
+                    let mut prev_packet_time = packet_stream.next().unwrap();
+                    let mut durations = vec![];
+                    let mut gcd_ok_duration = vec![];
+                    loop {
+                        let new_packet_time  =  packet_stream.next().unwrap();
+                        let new_duration = new_packet_time - prev_packet_time;
+                        if new_packet_time <= prev_packet_time {
+                            panic!("packet time wrapped")
+                        }
+                        prev_packet_time = new_packet_time;
+                        durations.push(new_duration);
+                        let new_duration_max = new_duration as f64 / (1.0 + 500.0/1_000_000.0);
+                        let new_max_drift = new_duration_max * (500.0/1_000_000.0);
+                        // Check if OK for GCD
+                        if new_max_drift < 624.5 {
+                            gcd_ok_duration.push(new_duration);
+                            // + 1 because in theory you start from say I have x, then n more packets. + 1 is the first duration
+                            if gcd_ok_duration.len() >= (gcd_thress as usize) + 1{
+                                let conn_int_gs = gcd_ok_duration.iter().map(|d| {let mod_1250 = *d % 1250;if mod_1250 < 625 {*d - mod_1250} else {*d + 1250 - mod_1250}}).collect_vec();
+                                for c in conn_int_gs.iter() {
+                                    if *c % connection.connection_interval as u64 != 0 {
+                                        panic!("Got illegal in conn_interval")
+                                    }
+                                }
+
+                                let conn_int =   conn_int_gs.clone().into_iter().reduce(gcd).unwrap() as u32;
+                                if conn_int < connection.connection_interval { //|| conn_int != conn_interval {
+                                    panic!("GCD candidates had wrong rounding")
+                                }
+                                return (conn_interval == conn_int, conn_int, connection.cur_time - connection.start_time, true)
+                            }
+                        }
+                    }
+                }).collect_vec();
+                (conn_interval, res)
+            })
+            .collect::<Vec<_>>();
+        (gcd_thress, sims)
+    }).collect::<Vec<_>>();
+            
+
+    const HEIGHT: u32 = 1080;
+    const WIDTH: u32 = 1080; // was 1920
+                            // Get the brute pixel backend canvas
+    let root_area = BitMapBackend::new(file_path.as_path(), (WIDTH, HEIGHT)).into_drawing_area();
+
+    root_area.fill(&WHITE).unwrap();
+
+    //let root_area = root_area.margin(20, 20, 20, 20);
+
+    // Turn it into higher level chart
+    let mut events_chart = ChartBuilder::on(&root_area)
+        // enables Y axis, the size is 40 px in width
+        .set_label_area_size(LabelAreaPosition::Left, 100)
+        // enable X axis, the size is 40 px in height
+        .set_label_area_size(LabelAreaPosition::Bottom, 60) // Reserves place for axis description so they dont collide with labels/ticks
+        // Set title. Font and size.
+        .caption(format!("Onlyg gcd mean time and success for {:.2} capture chance, {} sims per point", CAPTURE_CHANCE, NUMBER_SIMS), ("sans-serif", 20))
+        .margin(20)
+        //.right_y_label_area_size(80)
+        //.build_cartesian_2d(min..max, 0..100_000u32)
+        .build_cartesian_2d(7500..(ROUND_THRESS as u32 + 1), 0.0..1.02f64)
+        //(infos.iter().map(|f| OrderedFloat::from(f.total_revenue)).max().unwrap().into_inner() * 1.1))
+        .expect("Chart building failed.")
+        .set_secondary_coord(7500..(ROUND_THRESS as u32 + 1), (0..1000u64));
+
+    // .format("%Y-%m-%d").to_string()
+
+    // Do makeup
+    events_chart
+        .configure_mesh()
+        //.light_line_style(&WHITE)
+        .disable_x_mesh()
+        .y_desc("Success rate")
+        .x_desc("Connection interval")
+        //.set_all_tick_mark_size(20) -> the little line that come out of the graph
+        .label_style(("sans-serif", 20)) // The style of the numbers on an axis
+        .axis_desc_style(("sans-serif", 20))
+        .draw()
+        .unwrap();
+
+    
+    events_chart.configure_secondary_axes()
+        .y_desc("Total time in seconds")
+        .label_style(("sans-serif", 20)) // The style of the numbers on an axis
+        .axis_desc_style(("sans-serif", 20))
+        .draw().unwrap();
+
+    for (idx, (gcd_thress, dat)) in sims.into_iter().enumerate() {
+        let mut success_rates = vec![];
+        let mut times = vec![];
+        for (conn_interval, dat) in dat.into_iter() {
+
+            let mut successes = 0 ;
+            let mut total_time : u64 = 0;
+            let nb_samples = dat.len();
+            for (success, _calculated_conn, tot_time, _was_gcd) in dat.iter() {
+                if *success {successes += 1}
+                total_time += *tot_time as u64;
+            }
+            let success_rate = successes as f64 / nb_samples as f64;
+            let mean_time = total_time as f64 / nb_samples as f64;
+            // Put mean time to seconds
+            let mean_time = (mean_time / 1_000_000.0).round() as u64;
+            if 4000000 - conn_interval < 1250 * STEP as u32 {
+                //println!("{} {} {}", success_rate, mean_time, conn_interval);
+                //dat.iter().for_each(|d| println!("{:?}", d))
+            }
+            success_rates.push((conn_interval, success_rate));
+            times.push((conn_interval, mean_time));
+        }
+
+
+        let color = Palette99::pick(idx);
+        let o = LineSeries::new(
+            success_rates.into_iter(),
+            color.to_rgba().stroke_width(3));
+        events_chart.draw_series(o).unwrap()
+        .label(format!("{} thresshold ({} durations)", gcd_thress, gcd_thress + 1))
+        .legend(move |(x, y)| Circle::new((x, y), 4, color.filled()));
+        //let color = Palette99::pick(idx);
+        //let o = LineSeries::new(
+            //times.into_iter(),
+            //color.to_rgba().stroke_width(3));
+        //events_chart.draw_secondary_series(o).unwrap();
+
+    }
+
+
+    // Draws the legend
+    events_chart
+        .configure_series_labels()
+        .background_style(&WHITE.mix(0.8))
+        .border_style(&BLACK)
+        .label_font(("sans-serif", 15))
+        .position(SeriesLabelPosition::UpperRight)
+        .draw()
+        .unwrap();
+}
+
+
 fn conn_interval_sim<R: RngCore + Send + Sync>(params: SimulationParameters<R>, bars: Arc<Mutex<MultiProgress>>) {
     let mut file_path = params.output_dir;
     let mut rng = params.rng;
     file_path.push("conn_interval_sim.png");
 
-    const GDC_THRESS : usize = 2;
-    const NUMBER_SIMS : u32 = 100;
-    const SUCCESS_RATE: f64 = 0.9;
+
+    const NUMBER_SIMS : u32 = 10000;
+    const SUCCESS_RATE: f64 = 0.91;
+    const STEP : usize = 20;
+
+    // Plus one because of the start assumption of already having a duration
+    // another + 1 because my qdf is not x + 1 but x
+    let gcd_thress_nb_durations = geo_qdf(1.0/2.0, SUCCESS_RATE) + 2;
+    println!("{} gcd thres", gcd_thress_nb_durations - 2);
 
     let capture_chances = vec![0.2f64, 0.1f64, 0.02f64];
 
@@ -910,7 +1100,7 @@ fn conn_interval_sim<R: RngCore + Send + Sync>(params: SimulationParameters<R>, 
         
         let necessary_nb_packets = geo_qdf(capture_chance, SUCCESS_RATE);
 
-        let sims = (7500u32..=4000000).map(|i| (i,ChaCha20Rng::seed_from_u64(rng.next_u64())))
+        let sims = (7500u32..=4000000).step_by(1250 * STEP).map(|i| (i,ChaCha20Rng::seed_from_u64(rng.next_u64())))
             .collect_vec();
             
         let sims = sims
@@ -921,6 +1111,15 @@ fn conn_interval_sim<R: RngCore + Send + Sync>(params: SimulationParameters<R>, 
                     let mut connection = BleConnection::new(&mut rng, None);
                     connection.connection_interval = conn_interval;
 
+                    // Enforce the ppm max
+                    if connection.connection_interval as f64 * connection.master_ppm as f64 / 1_000_000.0 > 624.5 {
+                        let legal_ppm_max = (625.0 * 1_000_000.0 / connection.connection_interval as f64) as u16;
+                        if !(156..500).contains(&legal_ppm_max) {
+                            panic!("ubvak")
+                        }
+                        connection.master_ppm = rng.gen_range(10..=legal_ppm_max);
+                    }
+
                     // packet stream
                     let mut packet_stream = (1..).map(|_| {connection.next_channel(); connection.cur_time}).filter(|_| rng.gen_range(0.0..1.0) <= capture_chance);
                     // Get initial packet
@@ -929,55 +1128,41 @@ fn conn_interval_sim<R: RngCore + Send + Sync>(params: SimulationParameters<R>, 
                     let mut gcd_ok_duration = vec![];
                     loop {
                         let new_packet_time  =  packet_stream.next().unwrap();
-                        let new_duration = prev_packet_time - new_packet_time;
+                        let new_duration = new_packet_time - prev_packet_time;
+                        if new_packet_time <= prev_packet_time {
+                            panic!("packet time wrapped")
+                        }
                         prev_packet_time = new_packet_time;
                         durations.push(new_duration);
+                        let new_duration_max = new_duration as f64 / (1.0 + 500.0/1_000_000.0);
+                        let new_max_drift = new_duration_max * (500.0/1_000_000.0);
                         // Check if OK for GCD
-                        if new_duration as f64 * (500.0/1_000_000.0) < 625.0 {
+                        if new_max_drift < 624.5 {
                             gcd_ok_duration.push(new_duration);
-                            if gcd_ok_duration.len() >= GDC_THRESS {
-                                let conn_int = gcd_ok_duration.into_iter().map(|d| if d % 1250 < 625 {d - d % 1250} else {d + 1250 - d % 1250})
-                                    .reduce(gcd).unwrap() as u32;
-                                return (conn_interval == conn_int, conn_int, connection.cur_time, true)
+                            // + 1 because in theory you start from say I have x, then n more packets. + 1 is the first duration
+                            if gcd_ok_duration.len() >= gcd_thress_nb_durations as usize{
+                                let conn_int_gs = gcd_ok_duration.iter().map(|d| {let mod_1250 = *d % 1250;if mod_1250 < 625 {*d - mod_1250} else {*d + 1250 - mod_1250}}).collect_vec();
+                                for c in conn_int_gs.iter() {
+                                    if *c % connection.connection_interval as u64 != 0 {
+                                        panic!("Got illegal in conn_interval")
+                                    }
+                                }
+
+                                let conn_int =   conn_int_gs.clone().into_iter().reduce(gcd).unwrap() as u32;
+                                if conn_int < connection.connection_interval { //|| conn_int != conn_interval {
+                                    panic!("GCD candidates had wrong rounding")
+                                }
+                                return (conn_interval == conn_int, conn_int, connection.cur_time - connection.start_time, true)
                             }
                         }
                         // Check if we reached thresshold
                         if durations.len() as u32 >= necessary_nb_packets {
+                            // Find smallest and round
                             let smallest = *durations.iter().min().unwrap();
-                            let smallest_max = smallest + (smallest as f64 * (500.0/1_000_000.0)).ceil() as u64;
-                            let smallest_min = smallest - (smallest as f64 * (500.0/1_000_000.0)).ceil() as u64;
-                            let multiple = if  let Some(mutliple) = durations.iter()
-                                .filter(|d| **d - (**d as f64 * (500.0/1_000_000.0)).ceil() as u64 > smallest_max).min() { *mutliple} 
-                                else {
-                                    fn rec_pos(durations: &mut Vec<u64>, mut running_duration: u64) -> Vec<u64> {
-                                        if durations.len() == 1 {
-                                            return vec![]
-                                        }
-                                        
-                                        let new = durations.pop().unwrap();
-                                        running_duration += new;
-                                        let mut rec = rec_pos(durations, running_duration);
-                                        rec.push(running_duration);
-                                        rec
-                                    }
-
-                                    durations.reverse();
-                                    let r = rec_pos(&mut durations, 0);
-                                    if let Some(mul) = r.into_iter().filter(|d| *d - (*d as f64 * (500.0/1_000_000.0)).ceil() as u64 > smallest_max).min() {
-                                        mul
-                                    }
-                                    else {
-                                        continue;
-                                    }
-                                };
-                            let multiple_max = multiple + (multiple as f64 * (500.0/1_000_000.0)).ceil() as u64;
-                            let multiple_max_in_1250 = ((multiple_max - multiple_max % 1250) / 1250) as u32; // Always round down, round up would not be possible
-                            let smallest_max_in_1250 = ((smallest_max - smallest_max % 1250) / 1250) as u32; 
-                            let multiple_min = multiple - (multiple as f64 * (500.0/1_000_000.0)).ceil() as u64;
-                            let multiple_min_in_1250 = ((multiple_min + 1250 - multiple_min % 1250) / 1250) as u32; // Always round down, round up would not be possible
-                            let smallest_min_in_1250 = ((smallest_min + 1250 - smallest_min % 1250) / 1250) as u32;
-                            let conn_int = (smallest_min_in_1250..=smallest_max_in_1250).cartesian_product(multiple_min_in_1250..=multiple_max_in_1250).find_map(|(smallest, multiple)| if multiple % smallest == 0 {Some(smallest * 1250)} else {None}).expect("Smallest was not factor of multiple!");
-                            return (conn_interval == conn_int, conn_int, connection.cur_time, false)
+                            let mod_1250 = smallest % 1250;
+                            let conn_int = if mod_1250 < 625 {smallest - mod_1250} else {smallest + 1250 - mod_1250} as u32;
+                            // Take it as the conn_interval
+                            return (conn_interval == conn_int, conn_int, connection.cur_time - connection.start_time, false)
                         }
                     }
                 }).collect_vec();
@@ -1004,14 +1189,14 @@ fn conn_interval_sim<R: RngCore + Send + Sync>(params: SimulationParameters<R>, 
         // enable X axis, the size is 40 px in height
         .set_label_area_size(LabelAreaPosition::Bottom, 60) // Reserves place for axis description so they dont collide with labels/ticks
         // Set title. Font and size.
-        .caption(format!("Mean time and success, {} sims per point", NUMBER_SIMS), ("sans-serif", 20))
+        .caption(format!("Mean time and success for {:.2} minimum success, {} sims per point", SUCCESS_RATE, NUMBER_SIMS), ("sans-serif", 20))
         .margin(20)
         .right_y_label_area_size(80)
         //.build_cartesian_2d(min..max, 0..100_000u32)
         .build_cartesian_2d(7500..4_000_001_u32, 0.0..1.02f64)
         //(infos.iter().map(|f| OrderedFloat::from(f.total_revenue)).max().unwrap().into_inner() * 1.1))
         .expect("Chart building failed.")
-        .set_secondary_coord(7500..4_000_001_u32, 0..1_000_000u64);
+        .set_secondary_coord(7500..4_000_001_u32, (0..1000u64));
 
     // .format("%Y-%m-%d").to_string()
 
@@ -1039,17 +1224,22 @@ fn conn_interval_sim<R: RngCore + Send + Sync>(params: SimulationParameters<R>, 
         let mut success_rates = vec![];
         let mut times = vec![];
         for (conn_interval, dat) in dat.into_iter() {
+
             let mut successes = 0 ;
             let mut total_time : u64 = 0;
             let nb_samples = dat.len();
-            for (success, _calculated_conn, tot_time, _was_gcd) in dat {
-                if success {successes += 1}
-                total_time += tot_time as u64;
+            for (success, _calculated_conn, tot_time, _was_gcd) in dat.iter() {
+                if *success {successes += 1}
+                total_time += *tot_time as u64;
             }
             let success_rate = successes as f64 / nb_samples as f64;
             let mean_time = total_time as f64 / nb_samples as f64;
             // Put mean time to seconds
             let mean_time = (mean_time / 1_000_000.0).round() as u64;
+            if 4000000 - conn_interval < 1250 * STEP as u32 {
+                //println!("{} {} {}", success_rate, mean_time, conn_interval);
+                //dat.iter().for_each(|d| println!("{:?}", d))
+            }
             success_rates.push((conn_interval, success_rate));
             times.push((conn_interval, mean_time));
         }
@@ -1081,6 +1271,7 @@ fn conn_interval_sim<R: RngCore + Send + Sync>(params: SimulationParameters<R>, 
         .draw()
         .unwrap();
 }
+
 
 
 

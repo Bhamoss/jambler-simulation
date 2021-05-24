@@ -1,5 +1,6 @@
 mod cli;
 mod tasks;
+mod csa2;
 use clap::Clap;
 use itertools::Itertools;
 use rand::{thread_rng, RngCore, SeedableRng};
@@ -108,7 +109,11 @@ fn main() {
             //println!("Running all tasks");
             // List tasks
             let tasks: Vec<Box<dyn Task>> =
-                vec![Box::new(&channel_occurrences), Box::new(&channel_recovery), Box::new(&conn_interval)];
+                vec![
+                    //Box::new(&channel_occurrences), 
+                    Box::new(&channel_recovery), 
+                    //Box::new(&conn_interval)
+                    ];
             run_tasks(tasks, params, progress);
         }
         cli::SimTask::ChannelOccurrences => {
