@@ -1,4 +1,4 @@
-
+#![allow(dead_code)]
 use core::cmp::{max, min};
 
 
@@ -200,13 +200,14 @@ pub fn calculate_subevent_d(nb_used: u8) -> u8 {
 ///     - same d
 ///     - last_usedprn = prnSubEvent_lu (from previous csa2_subevent run)
 ///     - index_of_last_used_channel = subEventIndex_se_n-1 (from previous csa2_subevent run)
+#[allow(clippy::too_many_arguments)]
 pub fn csa2_subevent(
     last_usedprn: u32,
     index_of_last_used_channel: u32,
     channel_identifier: u32,
-    channel_map: &[bool; 37],
+    _channel_map: &[bool; 37],
     remapping_table: &[u8; 37],
-    inverse_remapping_table: &[u8; 37],
+    _inverse_remapping_table: &[u8; 37],
     nb_used: u8,
     d: u8,
 ) -> (u8, u32, u32) {
@@ -347,7 +348,7 @@ mod tests {
         let channel_identifier: u16 = calculate_channel_identifier(access_address);
         let channel_identifier: u32 = channel_identifier as u32;
 
-        let (channel_map_array, remapping_table, inverse_remapping_table, nb_used) =
+        let (channel_map_array, remapping_table, _, nb_used) =
         generate_channel_map_arrays(channel_map);
 
         let expected: Vec<u8> = vec![25, 20, 6, 21];
@@ -365,7 +366,7 @@ mod tests {
 
         // other examples with new channel map
         let channel_map: u64 = 0b1_1110_0000_0000_1110_0000_0000_0110_0000_0000;
-        let (channel_map_array, remapping_table, inverse_remapping_table, nb_used) =
+        let (channel_map_array, remapping_table, _, nb_used) =
         generate_channel_map_arrays(channel_map);
 
         //3.2 REMAPPING

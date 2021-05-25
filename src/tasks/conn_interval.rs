@@ -1,12 +1,13 @@
 use itertools::Itertools;
+use jambler::jambler::BlePhy;
 use plotters::prelude::*;
 use rand::{Rng, seq::SliceRandom};
 use rand::{RngCore, SeedableRng};
 use rand_chacha::ChaCha20Rng;
 use rayon::prelude::*;
-use std::{cmp::{max, min}, fs::{create_dir_all, File}, iter::once, mem::needs_drop, ops::RangeBounds};
+use std::{fs::{create_dir_all, File}};
 
-use statrs::distribution::{Binomial, Erlang, Geometric, Hypergeometric};
+use statrs::distribution::{Binomial,Geometric};
 use statrs::{distribution::Univariate, statistics::Mean};
 use std::f64;
 use num::{Integer, integer::{binomial, gcd}};
@@ -25,19 +26,20 @@ pub fn conn_interval<R: RngCore + Send + Sync>(mut params: SimulationParameters<
     params.output_dir.push("conn_interval");
     create_dir_all(&params.output_dir).unwrap();
     let tasks: Vec<Box<dyn Task>> = vec![
-        /*
+        
         Box::new(gcd_sim),
         Box::new(too_much_drift),
         Box::new(bates_cdf_plot),
         Box::new(bates_necessary_n),
         Box::new(one_interval_delta),
         Box::new(one_interval_delta_necessary_packets),
-        */
-        //Box::new(conn_interval_sim),
+        Box::new(conn_interval_sim),
         Box::new(conn_interval_only_gcd_sim),
-        //Box::new(time_boxplots_per_nb_used),
-    ]; // conn_interval_only_gcd_sim
+        Box::new(capture_chance_sim),
+    ]; // capture_chance_sim
     run_tasks(tasks, params, bars);
+
+    println!("Connection interval done");
 }
 
 
@@ -46,7 +48,7 @@ fn gcd_sim<R: RngCore + Send + Sync>(params: SimulationParameters<R>, bars: Arc<
     let mut rng = params.rng;
     file_path.push("gcd.png");
 
-    const NUMBER_SIMS : u32 = 10000;
+    const NUMBER_SIMS : u32 = 1000;
 
 
 
@@ -59,7 +61,7 @@ fn gcd_sim<R: RngCore + Send + Sync>(params: SimulationParameters<R>, bars: Arc<
 
     File::create(file_path.clone()).expect("Failed to create plot file");
 
-    let todo = Mutex::new(NUMBER_SIMS);
+    //let todo = Mutex::new(NUMBER_SIMS);
     //println!("voor simulatie");
     // Do a simulations
     let sims = (0..NUMBER_SIMS).map(|_| ChaCha20Rng::seed_from_u64(rng.next_u64()))
@@ -299,6 +301,7 @@ fn too_much_drift<R: RngCore + Send + Sync>(params: SimulationParameters<R>, _ba
         .unwrap();
 }
 
+#[allow(dead_code)]
 fn mean_drifters<R: RngCore + Send + Sync>(params: SimulationParameters<R>, _bars: Arc<Mutex<MultiProgress>>) {
     let mut file_path = params.output_dir;
     let mut _rng = params.rng;
@@ -366,7 +369,7 @@ fn mean_drifters<R: RngCore + Send + Sync>(params: SimulationParameters<R>, _bar
                 // TODO die dit voor paar verschillende capture chancen
                 // TODO voor een gegeven capture chance is de verwachte waarde # wachten dan
                 // TODO P(zal in aanmerking komen)*nodig voor GCD + (1-P(aanmerking))*nodig voor CLT
-                let mut needed_n = 0;
+                let mut _needed_n = 0;
                 for n in 1..=8u8 {
                     let max_drift = conn_int as f64 * (500.0/1000000.0);
                     let left = conn_int as f64 - max_drift;
@@ -376,7 +379,7 @@ fn mean_drifters<R: RngCore + Send + Sync>(params: SimulationParameters<R>, _bar
                     // Change drift left and drift right too much
                     let percentage_ok = bates_cdf(624.5, left, right, n) - bates_cdf(-624.5, left, right, n);
                     if percentage_ok > 0.8 {
-                        needed_n = n;
+                        _needed_n = n;
                         break;
                     }
                 }
@@ -675,7 +678,7 @@ fn one_interval_delta<R: RngCore + Send + Sync>(params: SimulationParameters<R>,
     for (idx, (nb_sniffs, phy_ch)) in capture_chances.into_iter().enumerate() {
         let capture_chance = nb_sniffs as f64 / 37.0 * phy_ch;
         let dist = Geometric::new(capture_chance).unwrap();
-        let expected_events_for_one_packet = dist.mean().ceil() as u32;
+        let _expected_events_for_one_packet = dist.mean().ceil() as u32;
         let color = Palette99::pick(idx);
         // x range is nb used channels
         let theoretical = LineSeries::new(
@@ -722,40 +725,43 @@ fn geo_qdf(p: f64, wanted_probability : f64) -> u32 {
     raw.ceil() as u32 
 }
 
+#[allow(dead_code)]
 fn geo_cdf(p: f64, occurences: u32) -> f64 {
     assert!(occurences > 0);
     1.0f64 - (1.0 - p).powi(occurences as i32)
 }
 
 #[cfg(test)]
-mod GeoTest {
+mod geo_test {
     use super::{geo_qdf, geo_cdf};
     use statrs::distribution::Geometric;
     use statrs::distribution::Univariate;
     #[test]
     fn geo() {
-        let p = 0.03;
-        let x = 0.141266;
-        let y = 5;
-        let dist = Geometric::new(p).unwrap();
-        assert!((geo_cdf(p, y) - x).abs() < 0.0001, "{} was not {}", geo_cdf(p, y), x);
-        assert!((dist.cdf(y as f64) - x).abs() < 0.00001);
-        assert_eq!(geo_qdf(p, x - 0.01), y);
-        let calced = geo_qdf(p, x - 0.001);
-        assert_eq!(calced, y);
-        let manual = geo_cdf(p, calced);
-        let g = dist.cdf(calced as f64);
-        assert!((g - manual).abs() < 0.0001, "{} {} {}", g, manual, calced);
-        let g = geo_qdf(p, x - 0.001);
-        assert_eq!(g, y);
-        let q = geo_cdf(p, calced);
-        assert!((q - x).abs() < 0.00001, "{} was not {}", q, x);
-        assert!((geo_cdf(p, g) - x).abs() < 0.0001);
+        let success_chance = 0.03;
+        let target_chance = 0.141266;
+        let required_repitions = 5;
+        let dist = Geometric::new(success_chance).unwrap();
+        assert!((geo_cdf(success_chance, required_repitions) - target_chance).abs() < 0.0001, "{} was not {}", geo_cdf(success_chance, required_repitions), target_chance);
+        assert!((dist.cdf(required_repitions as f64) - target_chance).abs() < 0.00001);
+        assert_eq!(geo_qdf(success_chance, target_chance - 0.01), required_repitions);
+        let calced = geo_qdf(success_chance, target_chance - 0.001);
+        assert_eq!(calced, required_repitions);
+        let manual = geo_cdf(success_chance, calced);
+        let dist_geo_cdf = dist.cdf(calced as f64);
+        assert!((dist_geo_cdf - manual).abs() < 0.0001, "{} {} {}", dist_geo_cdf, manual, calced);
+        let my_geo_qdf = geo_qdf(success_chance, target_chance - 0.001);
+        assert_eq!(my_geo_qdf, required_repitions);
+        let my_geo_cdf = geo_cdf(success_chance, calced);
+        assert!((my_geo_cdf - target_chance).abs() < 0.00001, "{} was not {}", my_geo_cdf, target_chance);
+        assert!((geo_cdf(success_chance, my_geo_qdf) - target_chance).abs() < 0.0001);
         let should_be_x = dist.cdf(calced as f64 + 0.5);
-        assert!((should_be_x - x).abs() < 0.01, "{} not {}", should_be_x, x)
+        assert!((should_be_x - target_chance).abs() < 0.01, "{} not {}", should_be_x, target_chance)
     }
 }
 
+
+#[allow(clippy::mut_range_bound)]
 fn one_interval_delta_necessary_packets<R: RngCore + Send + Sync>(params: SimulationParameters<R>, _bars: Arc<Mutex<MultiProgress>>) {
     let mut file_path = params.output_dir;
     let mut _rng = params.rng;
@@ -886,16 +892,16 @@ fn one_interval_delta_necessary_packets<R: RngCore + Send + Sync>(params: Simula
 }
 
 
-fn conn_interval_only_gcd_sim<R: RngCore + Send + Sync>(params: SimulationParameters<R>, bars: Arc<Mutex<MultiProgress>>) {
+fn conn_interval_only_gcd_sim<R: RngCore + Send + Sync>(params: SimulationParameters<R>, _bars: Arc<Mutex<MultiProgress>>) {
     let mut file_path = params.output_dir;
     let mut rng = params.rng;
     file_path.push("conn_interval_only_gcd_sim.png");
 
-    const NUMBER_SIMS : u32 = 10000;
+    const NUMBER_SIMS : u32 = 1000;
     const CAPTURE_CHANCE: f64 = 0.02;
     const STEP : usize = 20;
 
-    let gdc_thresses = (0u8..=5).collect_vec();
+    let gdc_thresses = (1u8..=6).collect_vec();
 
 
     File::create(file_path.clone()).expect("Failed to create plot file");
@@ -943,7 +949,7 @@ fn conn_interval_only_gcd_sim<R: RngCore + Send + Sync>(params: SimulationParame
                         if new_max_drift < 624.5 {
                             gcd_ok_duration.push(new_duration);
                             // + 1 because in theory you start from say I have x, then n more packets. + 1 is the first duration
-                            if gcd_ok_duration.len() >= (gcd_thress as usize) + 1{
+                            if gcd_ok_duration.len() >= gcd_thress as usize{
                                 let conn_int_gs = gcd_ok_duration.iter().map(|d| {let mod_1250 = *d % 1250;if mod_1250 < 625 {*d - mod_1250} else {*d + 1250 - mod_1250}}).collect_vec();
                                 for c in conn_int_gs.iter() {
                                     if *c % connection.connection_interval as u64 != 0 {
@@ -951,7 +957,7 @@ fn conn_interval_only_gcd_sim<R: RngCore + Send + Sync>(params: SimulationParame
                                     }
                                 }
 
-                                let conn_int =   conn_int_gs.clone().into_iter().reduce(gcd).unwrap() as u32;
+                                let conn_int =   conn_int_gs.into_iter().reduce(gcd).unwrap() as u32;
                                 if conn_int < connection.connection_interval { //|| conn_int != conn_interval {
                                     panic!("GCD candidates had wrong rounding")
                                 }
@@ -990,7 +996,7 @@ fn conn_interval_only_gcd_sim<R: RngCore + Send + Sync>(params: SimulationParame
         .build_cartesian_2d(7500..(ROUND_THRESS as u32 + 1), 0.0..1.02f64)
         //(infos.iter().map(|f| OrderedFloat::from(f.total_revenue)).max().unwrap().into_inner() * 1.1))
         .expect("Chart building failed.")
-        .set_secondary_coord(7500..(ROUND_THRESS as u32 + 1), (0..1000u64));
+        .set_secondary_coord(7500..(ROUND_THRESS as u32 + 1), 0..1000u64);
 
     // .format("%Y-%m-%d").to_string()
 
@@ -1044,7 +1050,7 @@ fn conn_interval_only_gcd_sim<R: RngCore + Send + Sync>(params: SimulationParame
             success_rates.into_iter(),
             color.to_rgba().stroke_width(3));
         events_chart.draw_series(o).unwrap()
-        .label(format!("{} thresshold ({} durations)", gcd_thress, gcd_thress + 1))
+        .label(format!("{} durations thresshold ", gcd_thress))
         .legend(move |(x, y)| Circle::new((x, y), 4, color.filled()));
         //let color = Palette99::pick(idx);
         //let o = LineSeries::new(
@@ -1067,20 +1073,20 @@ fn conn_interval_only_gcd_sim<R: RngCore + Send + Sync>(params: SimulationParame
 }
 
 
-fn conn_interval_sim<R: RngCore + Send + Sync>(params: SimulationParameters<R>, bars: Arc<Mutex<MultiProgress>>) {
+fn conn_interval_sim<R: RngCore + Send + Sync>(params: SimulationParameters<R>, _bars: Arc<Mutex<MultiProgress>>) {
     let mut file_path = params.output_dir;
     let mut rng = params.rng;
     file_path.push("conn_interval_sim.png");
 
 
-    const NUMBER_SIMS : u32 = 10000;
+    const NUMBER_SIMS : u32 = 1000;
     const SUCCESS_RATE: f64 = 0.91;
     const STEP : usize = 20;
 
     // Plus one because of the start assumption of already having a duration
     // another + 1 because my qdf is not x + 1 but x
     let gcd_thress_nb_durations = geo_qdf(1.0/2.0, SUCCESS_RATE) + 2;
-    println!("{} gcd thres", gcd_thress_nb_durations - 2);
+    //println!("{} gcd thres", gcd_thress_nb_durations - 2);
 
     let capture_chances = vec![0.2f64, 0.1f64, 0.02f64];
 
@@ -1148,7 +1154,7 @@ fn conn_interval_sim<R: RngCore + Send + Sync>(params: SimulationParameters<R>, 
                                     }
                                 }
 
-                                let conn_int =   conn_int_gs.clone().into_iter().reduce(gcd).unwrap() as u32;
+                                let conn_int =   conn_int_gs.into_iter().reduce(gcd).unwrap() as u32;
                                 if conn_int < connection.connection_interval { //|| conn_int != conn_interval {
                                     panic!("GCD candidates had wrong rounding")
                                 }
@@ -1196,7 +1202,7 @@ fn conn_interval_sim<R: RngCore + Send + Sync>(params: SimulationParameters<R>, 
         .build_cartesian_2d(7500..4_000_001_u32, 0.0..1.02f64)
         //(infos.iter().map(|f| OrderedFloat::from(f.total_revenue)).max().unwrap().into_inner() * 1.1))
         .expect("Chart building failed.")
-        .set_secondary_coord(7500..4_000_001_u32, (0..1000u64));
+        .set_secondary_coord(7500..4_000_001_u32, 0..1000u64);
 
     // .format("%Y-%m-%d").to_string()
 
@@ -1274,168 +1280,204 @@ fn conn_interval_sim<R: RngCore + Send + Sync>(params: SimulationParameters<R>, 
 
 
 
+struct CaptureParams {
+    physical_chance: f64,
+    nb_sniffers: u8,
+    anchor_point_percentage: f64,
+    master_phy: BlePhy,
+    slave_phy: BlePhy,
+    silence_percentage: f64
+}
 
-fn time_boxplots_per_nb_used<R: RngCore + Send + Sync>(params: SimulationParameters<R>, bars: Arc<Mutex<MultiProgress>>)  {
 
-    const NUMBER_SIMS : u32 = 100;
+fn capture_chance_sim<R: RngCore + Send + Sync>(params: SimulationParameters<R>, _bars: Arc<Mutex<MultiProgress>>) {
 
     let mut file_path = params.output_dir;
     let mut rng = params.rng;
-    file_path.push("time_boxplots_per_nb_used");
+    // Dir for per nb unused observed
+    file_path.push("capture_chance_sim");
     create_dir_all(file_path.clone()).expect("Failed to create plot directory");
 
+    // First one gets taken as the number of events to plot them all together
+    let capture_params = vec![CaptureParams {
+        physical_chance: 0.8,
+        nb_sniffers: 5,
+        anchor_point_percentage: 0.9,
+        master_phy: BlePhy::Uncoded1M,
+        slave_phy: BlePhy::CodedS2,
+        silence_percentage: 0.05
+    },
+    CaptureParams {
+        physical_chance: 0.8,
+        nb_sniffers: 1,
+        anchor_point_percentage: 0.9,
+        master_phy: BlePhy::Uncoded1M,
+        slave_phy: BlePhy::CodedS2,
+        silence_percentage: 0.2
+    },
+    CaptureParams {
+        physical_chance: 0.6,
+        nb_sniffers: 10,
+        anchor_point_percentage: 0.95,
+        master_phy: BlePhy::CodedS8,
+        slave_phy: BlePhy::CodedS8,
+        silence_percentage: 0.05
+    },];
+    
+    let sims = capture_params.into_iter().map(|n| (n, ChaCha20Rng::seed_from_u64(rng.next_u64())))
+    .collect_vec();
+    sims.into_par_iter().enumerate().for_each(|(enu,(capture_params, mut urng))| {
+        // TODO create dir for capture params
+
+        
+        let mut file_path = file_path.clone();
+        file_path.push(format!("phy_{:.2}_snifs_{}_ap_{:.2}_{}",capture_params.physical_chance, capture_params.nb_sniffers,capture_params.anchor_point_percentage, enu));
+        create_dir_all(file_path.clone()).expect("Failed to create plot directory");
 
 
-    let nb_sniffers = vec![1u8, 5, 10, 15, 25, 37];
-    let max_error_rates = vec![0.1f64];
-    let packet_loss = vec![0.1f64];
+        let sims = (2u8..=37).map(|n| (n, ChaCha20Rng::seed_from_u64(urng.next_u64())))
+        .collect_vec();
 
-    let nt = NUMBER_SIMS as usize * 36 * nb_sniffers.len() * max_error_rates.len() * packet_loss.len();
-
-    // make new progress bar
-    let pb = bars.lock().unwrap().add(ProgressBar::new(nt as u64));
-    pb.set_style(ProgressStyle::default_bar()
-    .template("{spinner:.green} [{elapsed_precise}] [{wide_bar:.cyan/blue}] {pos}/{len} ({eta}) {msg}")
-    .progress_chars("#>-"));
-    let pb = Mutex::new(pb);
-
-    let todo = Mutex::new((2u8..38).collect_vec());
-
-    let plots = nb_sniffers.into_iter().cartesian_product(max_error_rates.into_iter().cartesian_product(packet_loss.into_iter()))
-    .map(|(b, (e, p))| (b, e, p,ChaCha20Rng::seed_from_u64(rng.next_u64()))).collect_vec();
-    plots.into_par_iter().for_each(|(nb_sniffers, max_error, packet_loss,mut rng)| {
-
-        // simulate for every possible real used
-        let sims = (2u8..=37).map(|i| (i, ChaCha20Rng::seed_from_u64(rng.next_u64()))).collect_vec();
-        // Contains (actual_nb_used, vec over simulation with ((success, not no_solution), nb_bfs, extra_packets after channel map))
-        /*
-        let sims = sims.into_par_iter().map(|(nb_used, mut rng)|{
-            let dist =  Geometric::new((1.0-packet_loss)*(1.0/nb_used as f64)).unwrap();
-            let capture_chance = dist.cdf(events as f64 + 0.5);
+        const NUMBER_SIMS : u32 = 400;
 
 
-            let sims = (0..NUMBER_SIMS).map(|i| (i, ChaCha20Rng::seed_from_u64(rng.next_u64()))).collect_vec();
-            let resses = sims.into_par_iter().map(|(_ns, mut rng)| {
-                // gen random connection
-                let mut connection = BleConnection::new(&mut rng, Some(nb_used as u8));
-                // Get a random channels sequence to do
-                let mut channels = connection.chm.to_vec().into_iter().enumerate().map(|(c, used)| Occ{ channel: c as u8, used}).collect_vec(); // (channel, is_used)
-                channels.shuffle(&mut rng);
+        // Calculate wait time for 1 exchange
+        let one_exchange_time = phy_to_max_time(&capture_params.master_phy) + 152 + 24 + phy_to_max_time(&capture_params.slave_phy) + 152 + 24;
+        // If you want to be 90% sure a previous one would have occurred before if there were some, do this
+        let necessary_exchanges = geo_qdf(capture_params.physical_chance, capture_params.anchor_point_percentage);
+        // TODO breakpoint en check die fucking qdf
+        let silence_time = one_exchange_time * necessary_exchanges as u64;
+        let time_to_switch = (silence_time as f64 / capture_params.silence_percentage) as u64; // 0.05 = 0.95 percent of time listening
 
-                // Simulate the channel map stage                        
-                let mut observerd_packets = channels.into_iter().filter_map(|occ| 
-                    if occ.used {(0..events).filter_map(|_|
-                        // If any is captured and the channel is the channel it is not unused -> negate this -> !(..)any
-                        if connection.next_channel() == occ.channel && rng.gen_range(0.0..1.0) <= capture_chance {
-                            Some((connection.cur_event_counter, connection.cur_channel))
-                        } else {None}).next()} // short circuit first channel occurrence
-                    else {(0..events).for_each(|_| {connection.next_channel();}); None} // let connection jump events_to_wait
+        sims.into_par_iter().for_each(|(nb_used, mut rng)| {
+            // PLOT PER NUMBER USED
+            const STEP : u32 = 37; // gewoon priem
+            let conn_int_sims = (7500u32..=4000000).step_by((1250 * STEP) as usize).filter_map(|conn_interval| {
+                if one_exchange_time >= conn_interval as u64 {return None} 
+                let sims = (0..NUMBER_SIMS).map(|_|{
+
+
+                    // gen random connection
+                    let mut connection = BleConnection::new(&mut rng, Some(nb_used as u8));
+                    connection.connection_interval = conn_interval;
+
+                    let mut sniffers_channels_start_time = connection.start_time;
+                    let mut sniffers_location = (0..capture_params.nb_sniffers).collect_vec();
+
+
+                    // Listen for 1000 connection events
+                    let captured = (0..1000).map(|_| 
+                        {
+                            // check if the first packet would have been caught (don't care here about anchor point error)
+                            let mut captured = false;
+                            let delta_since_start = connection.cur_time - sniffers_channels_start_time;
+                            if delta_since_start > silence_time && 
+                                sniffers_location.contains(&connection.cur_channel) &&
+                                rng.gen_range(0.0..1.0) <= capture_params.physical_chance {
+                                    captured = true;
+                            }
+
+                            // only at end
+                            connection.next_channel();
+                            if connection.cur_time >= sniffers_channels_start_time + time_to_switch {
+                                sniffers_channels_start_time += time_to_switch;
+                                //let mut st  = String::new();
+                                sniffers_location.iter_mut().for_each(|s| *s = (*s + capture_params.nb_sniffers) % 37);
+                                //.inspect(|s| st.push_str(format!("{} ", **s).as_str()))
+                                //st.push('\n');
+                                //sniffers_location.iter().for_each(|s| st.push_str(format!("{} ", *s).as_str()));
+                                //println!("{}\n\n\n", st);
+                                //std::io::stdout().flush();
+                            }
+                            captured
+                        }
                     ).collect_vec();
 
-                // Put them from the relative offset
-                let relative_event_offset = observerd_packets.first().unwrap().0;
-                observerd_packets.iter_mut().for_each(|p| p.0 = (p.0).wrapping_sub(relative_event_offset));
-                // Get channel map
-                let chm = observerd_packets.iter().fold(0u64, |chm, (_, channel)| chm | (1 << *channel));
-                let (channel_map_bool_array,_, _, nb_used_observed) =  generate_channel_map_arrays(chm);
-                let observed_used = (0u8..37).filter(|c| channel_map_bool_array[*c as usize]).collect_vec();
+                    let l =captured.len();
+                    captured.into_iter().filter(|b|*b).count() as f64 / l as f64
+                }).collect_vec();
+                Some((conn_interval, sims))
+            }).collect_vec();
+                
+            // TODO PLOT
+            let mut file_path = file_path.clone();
+            file_path.push(format!("{}_used.png", nb_used));
+            File::create(file_path.clone()).expect("Failed to create plot file");
 
-                // brute force and wait for new packets as long as you have no single solution
-                let mut extra_packets = 0u32;
-                let mut result = brute_force(extra_packets, bfs_max, nb_used, connection.channel_map, relative_event_offset,observerd_packets.as_slice(), chm, thress, events, packet_loss, connection.channel_id);
-                while let CounterInterval::MultipleSolutions = &result.0 {
-                    // Get extra packet
-                    extra_packets += 10;
-                    // Get random next channel to listen for extra packet
-                    let channel = observed_used[rng.gen_range(0..observed_used.len())];
-                    // Listen until you hear one
-                    let mut next_one = (0..).map(|_| {connection.next_channel(); (connection.cur_event_counter.wrapping_sub(relative_event_offset), connection.cur_channel)}).filter(|c| c.1 == channel  && rng.gen_range(0.0..1.0) <= capture_chance).take(10).collect_vec();
-                    // Add to observed
-                    observerd_packets.append(&mut next_one);
-
-                    //if nb_used == 37 && extra_packets > 50 {println!("Large packets {} for {}", extra_packets, nb_used)};
-
-                    // Brute force again
-                    result = brute_force(extra_packets, bfs_max, nb_used, connection.channel_map, relative_event_offset, observerd_packets.as_slice(), chm, thress, events, packet_loss, connection.channel_id);
-
-                }
-
-                //if nb_used == 37 { println!("Completed sim {} of {} for {}: {:?} {}", ns, NUMBER_SIMS, nb_used, &result, extra_packets)};
-                //if let Ok(p) = pb.lock() { p.inc(1); p.set_message(format!("{}", nb_used)) }
-                if let CounterInterval::ExactlyOneSolution(first_packet_actual_counter, found_chm) = &result.0 {
-                    (((*first_packet_actual_counter == relative_event_offset && connection.channel_map == *found_chm), true), result.1, extra_packets, nb_used - nb_used_observed)
-                }
-                else {
-                    ((false,false), result.1, extra_packets, nb_used - nb_used_observed)
-                }
-            }).collect::<Vec<_>>();
-            todo.lock().unwrap().retain(|x| *x != nb_used);
-            println!("{:?} todo", todo.lock().unwrap());
-            (nb_used, resses)
-        }).collect::<Vec<_>>();
-        */
-        //let sims = Vec::new();
-
-        let mut this_path = file_path.clone();
-        this_path.push(format!("time_{:02}-sniffers_{:.2}-err_{:.2}-pl.png",  nb_sniffers, max_error, packet_loss));
-        File::create(this_path.clone()).expect("Failed to create plot file");
+            const HEIGHT: u32 = 1080;
+            const WIDTH: u32 = 1080; // was 1920
+                                    // Get the brute pixel backend canvas
+            let root_area = BitMapBackend::new(file_path.as_path(), (WIDTH, HEIGHT)).into_drawing_area();
+            root_area.fill(&WHITE).unwrap();
 
 
-        // return 3 iterators with the boxlots
-        /*
-        let (successes, fns): (Vec<_>, Vec<_>) = sims.into_iter().map(|(nb_used : u8, data)| {
+            let mut events_chart = ChartBuilder::on(&root_area)
+                .set_label_area_size(LabelAreaPosition::Left, 120)
+                .set_label_area_size(LabelAreaPosition::Bottom, 60)
+                .caption(format!("Capture chance: {} used, {:.2} packet loss, {} sniffers, {:.2} ap, {:.2} silence, {} {} phys", 
+                    nb_used, 1.0 - capture_params.physical_chance, capture_params.nb_sniffers, capture_params.anchor_point_percentage, capture_params.silence_percentage
+                    , phy_to_string_short(&capture_params.master_phy), phy_to_string_short(&capture_params.slave_phy)), 
+                    ("sans-serif", 20))
+                .margin(20)
+                .build_cartesian_2d(plotters::prelude::IntoLinspace::step(7500u32..4000001, 1250 * STEP).into_segmented(), 0.0..1.05f32)
+                .expect("Chart building failed.");
+            events_chart
+                .configure_mesh()
+                .disable_x_mesh()
+                .y_desc("Capture chance")
+                .x_desc("Connection interval")
+                .label_style(("sans-serif", 20)) // The style of the numbers on an axis
+                .axis_desc_style(("sans-serif", 20))
+                .draw()
+                .unwrap();
+            
+            let boxes = conn_int_sims.iter().map(|(c, s)| Boxplot::new_vertical(SegmentValue::CenterOf(*c), &Quartiles::new(s)));
+            
+            //let o = LineSeries::new(
+            //    probs.iter().map(|p| (p.0 as u32, p.4)),
+            //    BLUE.stroke_width(3));
+            events_chart.draw_series(boxes).unwrap()
+            .label("Observed relative frequency")
+            .legend(move |(x, y)| Circle::new((x, y), 4, BLUE.filled()));
+            // Draw theoretical
+            let theo : f64 =  (1.0 - capture_params.silence_percentage) * capture_params.physical_chance * (capture_params.nb_sniffers as f64 / 37.0) ;
+            let c = LineSeries::new(
+            vec![(SegmentValue::Exact(7500), theo as f32), (SegmentValue::Exact(4000000),theo as f32)].into_iter(), RED.stroke_width(3));
+            events_chart.draw_series(c).unwrap()
+            .label("theoretical")
+            .legend(move |(x, y)| Circle::new((x, y), 4, RED.filled()));
+            // Draws the legend
+            events_chart
+                .configure_series_labels()
+                .background_style(&WHITE.mix(0.8))
+                .border_style(&BLACK)
+                .label_font(("sans-serif", 15))
+                .position(SeriesLabelPosition::UpperRight)
+                .draw()
+                .unwrap();              
 
-
-            #[allow(clippy::type_complexity)]
-            //let (successes,(no_sols, (bfs, (extra, fns)))): (Vec<_>, (Vec<_>, (Vec<_>, (Vec<_>, Vec<_>)))) = data.into_par_iter().inspect(|d| println!("{:?}", d)).map(|d| (d.0.0,(!d.0.1, (d.1, (d.2, d.3))))).unzip();
-
-            let successes = successes.into_iter().filter(|b| *b).count() as f64 / NUMBER_SIMS as f64;
-            let fns_quarts = Quartiles::new(&fns);
-
-            ( (nb_used, successes), Boxplot::new_vertical(nb_used as u32, &fns_quarts
-            ))
-        }).unzip();
-        */
-        let fns_quarts = Quartiles::new(&[0u32]);
-        let dummy = Boxplot::new_vertical(0, &fns_quarts);
-
-        let successes : Vec<(u8, f64)> = Vec::new();
-        let fns = vec![dummy];
-
-        const HEIGHT: u32 = 1080;
-        const WIDTH: u32 = 1080; // was 1920
-
-        // Successes/errors
-        let root_area = BitMapBackend::new(this_path.as_path(), (WIDTH, HEIGHT)).into_drawing_area();
-        root_area.fill(&WHITE).unwrap();
-        let mut events_chart = ChartBuilder::on(&root_area)
-            .set_label_area_size(LabelAreaPosition::Left, 120)
-            .set_label_area_size(LabelAreaPosition::Bottom, 60)
-            .caption(format!("time: {:02} sniffers, {:.2} error, {:.2} packet loss",  nb_sniffers, max_error, packet_loss), ("sans-serif", 20))
-            .margin(20)
-            .right_y_label_area_size(80)
-            .build_cartesian_2d(1..38u32, 0.0..1.05f32)
-            .expect("Chart building failed.")
-            .set_secondary_coord(1..38u32, 0.0..10.05f32); 
-        events_chart
-            .configure_mesh()
-            .disable_x_mesh()
-            .y_desc("Error rate")
-            .x_desc("Actual used channels")
-            .label_style(("sans-serif", 20)) // The style of the numbers on an axis
-            .axis_desc_style(("sans-serif", 20))
-            .draw()
-            .unwrap();
-        events_chart.configure_secondary_axes()
-            .y_desc("False negatives")
-            .label_style(("sans-serif", 20)) // The style of the numbers on an axis
-            .axis_desc_style(("sans-serif", 20))
-            .draw().unwrap();
-        let o = LineSeries::new(
-            successes.into_iter().map(|(nb_used, succ)| (nb_used as u32, 1.0 - succ as f32)),
-            RED.to_rgba().stroke_width(3));
-        events_chart.draw_series(o).unwrap();
-        events_chart.draw_secondary_series(fns).unwrap();
-
+        });
     });
+}
+
+fn phy_to_max_time(phy: &BlePhy) -> u64 {
+    static UNCODED_1M_SEND_TIME: u64 = 2128;
+    static UNCODED_2M_SEND_TIME: u64 = 2128 / 2 + 4;
+    static CODED_S2_SEND_TIME: u64 = 4542; // AA, CI, TERM1 in S8
+    static CODED_S8_SEND_TIME: u64 = 17040;
+    match phy {
+        BlePhy::Uncoded1M => {UNCODED_1M_SEND_TIME}
+        BlePhy::Uncoded2M => {UNCODED_2M_SEND_TIME}
+        BlePhy::CodedS2 => {CODED_S2_SEND_TIME}
+        BlePhy::CodedS8 => {CODED_S8_SEND_TIME}
+    }
+}
+
+fn phy_to_string_short(phy: &BlePhy) -> &str {
+    match phy {
+        BlePhy::Uncoded1M => {"1M"}
+        BlePhy::Uncoded2M => {"2M"}
+        BlePhy::CodedS2 => {"S2"}
+        BlePhy::CodedS8 => {"S8"}
+    }
 }

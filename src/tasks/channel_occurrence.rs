@@ -9,6 +9,7 @@ use rand::seq::SliceRandom;
 use rand::{Rng, RngCore, SeedableRng};
 use rand_chacha::ChaCha20Rng;
 use rayon::prelude::*;
+use statrs::distribution::{Geometric, Univariate};
 use stats::Frequencies;
 use std::{fs::{create_dir_all, File}, sync::{Arc, Mutex}};
 
@@ -24,6 +25,7 @@ pub fn channel_occurrences<R: RngCore + Send + Sync>(mut params: SimulationParam
         Box::new(error_by_wait_imperfect),
     ];
     run_tasks(tasks, params, bars);
+    println!("Channel occurrence done");
 }
 
 fn events_until_occurrence<R: RngCore + Send + Sync>(params: SimulationParameters<R>, _bars: Arc<Mutex<MultiProgress>>) {
@@ -37,7 +39,7 @@ fn events_until_occurrence<R: RngCore + Send + Sync>(params: SimulationParameter
 
     // Do a simulation
     let nb_unused = vec![0_u8, 5, 10, 20, 30];
-    const NUMBER_SIM: u32 = 100000;
+    const NUMBER_SIM: u32 = 10000;
     let sims = nb_unused
         .iter()
         .map(|n| (*n, ChaCha20Rng::seed_from_u64(rng.next_u64())))
@@ -137,8 +139,10 @@ fn events_until_occurrence<R: RngCore + Send + Sync>(params: SimulationParameter
         let color = Palette99::pick(*nb_unused as usize + 37).to_rgba();
 
         // TODO geometrisch verdeelt ->  verander use statrs::distribution::Geometric; met cdf functie
-        let theoretical_not_yet_seen =
-            move |x: u32| (1.0 - (1.0 / (37 - *nb_unused) as f64)).powi(x as i32);
+        //let theoretical_not_yet_seen =
+        //    move |x: u32| (1.0 - (1.0 / (37 - *nb_unused) as f64)).powi(x as i32);
+
+        let dist = Geometric::new(1.0 / (37 - *nb_unused) as f64).unwrap();
 
         //let u = *nb_unused;
 
@@ -146,7 +150,8 @@ fn events_until_occurrence<R: RngCore + Send + Sync>(params: SimulationParameter
             events_chart
                 .x_range()
                 .step_by(10)
-                .map(|i| (i, theoretical_not_yet_seen(i))),
+                //.map(|i| (i, theoretical_not_yet_seen(i))),
+                .map(|i| (i, 1.0 - dist.cdf(i as f64 + 0.5))),
             5,
             color.filled(),
             &{
@@ -217,7 +222,7 @@ fn events_until_occurrence_imperfect<R: RngCore + Send + Sync>(params: Simulatio
     // Do a simulation
     let nb_unused = vec![0_u8, 17];
     let capture_chances = vec![params.capture_chance, 1.0, 0.5];
-    const NUMBER_SIM: u32 = 100000;
+    const NUMBER_SIM: u32 = 10000;
     let sims = nb_unused
         .iter()
         .cartesian_product(capture_chances.iter())
@@ -325,8 +330,11 @@ fn events_until_occurrence_imperfect<R: RngCore + Send + Sync>(params: Simulatio
             Palette99::pick(*nb_unused as usize + 37).mix(0.5)
         };
 
-        let theoretical_not_yet_seen =
-            move |x: u32| (1.0 - *capture_chance * (1.0 / (37 - *nb_unused) as f64)).powi(x as i32);
+        //let theoretical_not_yet_seen =
+        //    move |x: u32| (1.0 - *capture_chance * (1.0 / (37 - *nb_unused) as f64)).powi(x as i32);
+
+        
+        let dist = Geometric::new(*capture_chance / (37 - *nb_unused) as f64).unwrap();
 
         //let u = *nb_unused;
 
@@ -334,7 +342,8 @@ fn events_until_occurrence_imperfect<R: RngCore + Send + Sync>(params: Simulatio
             events_chart
                 .x_range()
                 .step_by(10)
-                .map(|i| (i, theoretical_not_yet_seen(i))),
+                //.map(|i| (i, theoretical_not_yet_seen(i))),
+                .map(|i| (i, 1.0 - dist.cdf(i as f64 + 0.5))),
             5,
             color.filled(),
             &{

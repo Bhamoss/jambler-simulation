@@ -5,21 +5,22 @@ use rand::{Rng, seq::SliceRandom};
 use rand::{RngCore, SeedableRng};
 use rand_chacha::ChaCha20Rng;
 use rayon::prelude::*;
-use std::{fs::{create_dir_all, File}, io::Write};
+use std::{fs::{create_dir_all, File}};
 
 use statrs::distribution::{Binomial, Discrete, Geometric};
 use statrs::statistics::OrderStatistics;
 use statrs::{distribution::Univariate, statistics::Mean};
 use std::f64;
 use crate::csa2::csa2_no_subevent_unmapped;
-use num::{Integer, integer::{binomial, gcd}};
+use num::{integer::{binomial}};
 
 use crate::{SimulationParameters, Task, run_tasks, tasks::BleConnection};
 use jambler::ble_algorithms::csa2::{csa2_no_subevent, generate_channel_map_arrays};
 
 
 use std::sync::{Arc, Mutex};
-use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
+use indicatif::{MultiProgress};
+// use indicatif::{ ProgressBar, ProgressStyle};
 
 // TODO morgen: JE BENT ER BIJNA!!!!!
 // TODO Doe bovenstaande als simulatie: voor de nb_used = 37 - *nb_unused_seen + nb_false_negs
@@ -66,18 +67,15 @@ pub fn channel_recovery<R: RngCore + Send + Sync>(mut params: SimulationParamete
     params.output_dir.push("channel_recovery");
     create_dir_all(&params.output_dir).unwrap();
     let tasks: Vec<Box<dyn Task>> = vec![
-        //Box::new(false_negatives),
-        //Box::new(misclass_chance_vs_combinations),
-        //Box::new(nb_brute_force),
-        //Box::new(computing_vs_events),
-        //Box::new(how_many_to_check),
-        //Box::new(false_negative_chance_vs_combinations),
-        //Box::new(thressholds),
+        Box::new(false_negatives),
+        Box::new(false_negative_chance_vs_combinations),
+        Box::new(thressholds),
         // TODO uncomment, takes to much time
-        //Box::new(with_capture_chance),
+        Box::new(with_capture_chance),
         Box::new(chm_sim),
     ]; // chm_sim
     run_tasks(tasks, params, bars);
+    println!("Channel recovery done");
 }
 #[derive(Clone)]
 struct Occ {
@@ -168,7 +166,7 @@ fn false_negative_chance_vs_combinations<R: RngCore + Send + Sync>(params: Simul
                 assert!((prob - probf).abs() < 0.01);
 
                 // SIM
-                const NUMBER_SIM: u32 = 100; // TODO up to 10_000
+                const NUMBER_SIM: u32 = 1000; // TODO up to 10_000
                 let false_negatives_seen = (0..NUMBER_SIM)
                         .map(|_| {
                     // gen random connection
@@ -373,7 +371,7 @@ fn false_negatives<R: RngCore + Send + Sync>(params: SimulationParameters<R>, _b
     // Do a simulation
     let misclassify_chances = vec![0.10_f64, 0.15]; // given by the change not seen within x events
     let wanted_error_rate = vec![0.1_f64];
-    const NUMBER_SIM: u32 = 500; // TODO Up to 5000
+    const NUMBER_SIM: u32 = 1000; // TODO Up to 5000
     let sims = misclassify_chances
         .iter()
         .cartesian_product(wanted_error_rate.iter())
@@ -930,9 +928,9 @@ fn with_capture_chance<R: RngCore + Send + Sync>(params: SimulationParameters<R>
 
 
 
-fn chm_sim<R: RngCore + Send + Sync>(params: SimulationParameters<R>, bars: Arc<Mutex<MultiProgress>>)  {
+fn chm_sim<R: RngCore + Send + Sync>(params: SimulationParameters<R>, _bars: Arc<Mutex<MultiProgress>>)  {
 
-    const NUMBER_SIMS : u32 = 1000;
+    const NUMBER_SIMS : u32 = 500;
 
     let mut file_path = params.output_dir;
     let mut rng = params.rng;
@@ -959,20 +957,14 @@ fn chm_sim<R: RngCore + Send + Sync>(params: SimulationParameters<R>, bars: Arc<
 
 
 
-    let max_bfs_feasable = vec![1000];
-    let max_error_rates = vec![0.1];
+    let max_bfs_feasable = vec![100, 500];
+    let max_error_rates = vec![0.1, 0.3];
     let physical_error_rates = vec![0.1, 0.5];
 
-    let nt = NUMBER_SIMS as usize * 36 * max_bfs_feasable.len() * max_error_rates.len() * physical_error_rates.len();
+    //let nt = NUMBER_SIMS as usize * 36 * max_bfs_feasable.len() * max_error_rates.len() * physical_error_rates.len();
 
-    // make new progress bar
-    let pb = bars.lock().unwrap().add(ProgressBar::new(nt as u64));
-    pb.set_style(ProgressStyle::default_bar()
-    .template("{spinner:.green} [{elapsed_precise}] [{wide_bar:.cyan/blue}] {pos}/{len} ({eta}) {msg}")
-    .progress_chars("#>-"));
-    let pb = Mutex::new(pb);
 
-    let todo = Mutex::new((2u8..38).collect_vec());
+    //let todo = Mutex::new((2u8..38).collect_vec());
 
     let plots = max_bfs_feasable.into_iter().cartesian_product(max_error_rates.into_iter().cartesian_product(physical_error_rates.into_iter()))
     .map(|(b, (e, p))| (b, e, p,ChaCha20Rng::seed_from_u64(rng.next_u64()))).collect_vec();
@@ -1026,7 +1018,7 @@ fn chm_sim<R: RngCore + Send + Sync>(params: SimulationParameters<R>, bars: Arc<
 
         if let Some((events, thress)) = found {
 
-            println!("Simulating {} bfs {:.2} err {:.} pl with {} events and {:.2} thress",  bfs_max, max_error, packet_loss, events, thress);
+            //println!("Simulating {} bfs {:.2} err {:.} pl with {} events and {:.2} thress",  bfs_max, max_error, packet_loss, events, thress);
 
             // simulate for every possible real used
             let sims = (2u8..=37).map(|i| (i, ChaCha20Rng::seed_from_u64(rng.next_u64()))).collect_vec();
@@ -1091,11 +1083,11 @@ fn chm_sim<R: RngCore + Send + Sync>(params: SimulationParameters<R>, bars: Arc<
                             let mut running_counter = connection.cur_event_counter; // In reality should calculate with elapsed time and cur time
                             let nb_to_see = geo_qdf(1.0 - packet_loss, 0.98) as u8;
                             let mut todo_seen = [0u8;37];
-                            for c in 0..37usize {
+                            (0..37usize).for_each(|c| {
                                 if (1u64 << c) & chm_todo != 0 {
                                     todo_seen[c] = nb_to_see;
                                 }
-                            }
+                            });
                             // Listen as long as you have to
                             while todo_seen.iter().any(|s| *s != 0) {
                                 let c = connection.next_channel();
@@ -1134,8 +1126,8 @@ fn chm_sim<R: RngCore + Send + Sync>(params: SimulationParameters<R>, bars: Arc<
                         ((false,false), result.1, extra_packets, nb_used - nb_used_observed, total_nb_events, extra_events)
                     }
                 }).collect::<Vec<_>>();
-                todo.lock().unwrap().retain(|x| *x != nb_used);
-                println!("{:?} todo", todo.lock().unwrap());
+                //todo.lock().unwrap().retain(|x| *x != nb_used);
+                //println!("{:?} todo", todo.lock().unwrap());
                 (nb_used, resses)
             }).collect::<Vec<_>>();
 
@@ -1409,11 +1401,11 @@ fn geo_qdf(p: f64, wanted_probability : f64) -> u32 {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn brute_force(extra_packets: u32 ,bf_max: u64,actual_nb_used_debug :u8, actual_chm_debug : u64, actual_counter_debug : u16, packets : &[(u16, u8)], chm : u64, thresshold: f64, nb_events: u8, packet_loss: f64, channel_id: u16) -> (CounterInterval, u32) {
+fn brute_force(_extra_packets: u32 ,_bf_max: u64,actual_nb_used_debug :u8, actual_chm_debug : u64, actual_counter_debug : u16, packets : &[(u16, u8)], chm : u64, thresshold: f64, nb_events: u8, packet_loss: f64, channel_id: u16) -> (CounterInterval, u32) {
     //if actual_nb_used_debug == 37 { println!("bf for {} {} {}", actual_nb_used_debug, actual_counter_debug, actual_chm_debug)};
     let nb_unused_seen = (0u8..37).filter(|channel| chm & (1 << *channel) == 0).count() as u8;
     // Get the false positives for which the chance of it occurring is above the thresshold
-    let mut likely_false_negatives = (0..=nb_unused_seen)
+    let likely_false_negatives = (0..=nb_unused_seen)
         .filter(|fns| chance_and_combo_reality(nb_unused_seen, *fns,nb_events, 1.0 - packet_loss).0 >= thresshold).collect_vec();
     if likely_false_negatives.is_empty() {
         //if actual_nb_used_debug < 37 {

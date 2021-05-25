@@ -110,9 +110,9 @@ fn main() {
             // List tasks
             let tasks: Vec<Box<dyn Task>> =
                 vec![
-                    //Box::new(&channel_occurrences), 
+                    Box::new(&channel_occurrences), 
                     Box::new(&channel_recovery), 
-                    //Box::new(&conn_interval)
+                    Box::new(&conn_interval)
                     ];
             run_tasks(tasks, params, progress);
         }
