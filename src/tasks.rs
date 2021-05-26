@@ -1,11 +1,10 @@
 
-use jambler::ble_algorithms::{
-    access_address::is_valid_aa,
-    csa2::{calculate_channel_identifier, csa2_no_subevent, generate_channel_map_arrays},
-};
+
 use rand::{Rng, RngCore, SeedableRng};
 
 use rand_chacha::ChaCha20Rng;
+
+use crate::csa2::{BlePhy, calculate_channel_identifier, csa2_no_subevent, generate_channel_map_arrays, is_valid_aa};
 
 pub mod channel_occurrence;
 pub mod channel_recovery;
@@ -53,7 +52,7 @@ impl BleConnection {
 
         // Access address
         let mut access_address = rng.next_u32();
-        while !is_valid_aa(access_address, jambler::jambler::BlePhy::Uncoded1M) {
+        while !is_valid_aa(access_address, BlePhy::Uncoded1M) {
             access_address = rng.next_u32();
         }
         let channel_id = calculate_channel_identifier(access_address);

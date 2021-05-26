@@ -15,7 +15,7 @@ use crate::csa2::csa2_no_subevent_unmapped;
 use num::{integer::{binomial}};
 
 use crate::{SimulationParameters, Task, run_tasks, tasks::BleConnection};
-use jambler::ble_algorithms::csa2::{csa2_no_subevent, generate_channel_map_arrays};
+use crate::csa2::{csa2_no_subevent, generate_channel_map_arrays};
 
 
 use std::sync::{Arc, Mutex};

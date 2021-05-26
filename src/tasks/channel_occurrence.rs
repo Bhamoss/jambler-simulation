@@ -1,9 +1,6 @@
 use indicatif::MultiProgress;
 use itertools::Itertools;
-use jambler::ble_algorithms::{
-    access_address::is_valid_aa,
-    csa2::{calculate_channel_identifier, csa2_no_subevent, generate_channel_map_arrays},
-};
+use crate::csa2::{BlePhy, calculate_channel_identifier, csa2_no_subevent, generate_channel_map_arrays, is_valid_aa};
 use plotters::prelude::*;
 use rand::seq::SliceRandom;
 use rand::{Rng, RngCore, SeedableRng};
@@ -65,7 +62,7 @@ fn events_until_occurrence<R: RngCore + Send + Sync>(params: SimulationParameter
                     channel = (rng.next_u32() as u8) % 37;
                 }
                 let mut access_address = rng.next_u32();
-                while !is_valid_aa(access_address, jambler::jambler::BlePhy::Uncoded1M) {
+                while !is_valid_aa(access_address, BlePhy::Uncoded1M) {
                     access_address = rng.next_u32();
                 }
                 let channel_id = calculate_channel_identifier(access_address);
@@ -249,7 +246,7 @@ fn events_until_occurrence_imperfect<R: RngCore + Send + Sync>(params: Simulatio
                     channel = (rng.next_u32() as u8) % 37;
                 }
                 let mut access_address = rng.next_u32();
-                while !is_valid_aa(access_address, jambler::jambler::BlePhy::Uncoded1M) {
+                while !is_valid_aa(access_address, BlePhy::Uncoded1M) {
                     access_address = rng.next_u32();
                 }
                 let channel_id = calculate_channel_identifier(access_address);
@@ -453,7 +450,7 @@ fn error_by_wait<R: RngCore + Send + Sync>(params: SimulationParameters<R>, _bar
                     channel = (rng.next_u32() as u8) % 37;
                 }
                 let mut access_address = rng.next_u32();
-                while !is_valid_aa(access_address, jambler::jambler::BlePhy::Uncoded1M) {
+                while !is_valid_aa(access_address, BlePhy::Uncoded1M) {
                     access_address = rng.next_u32();
                 }
                 let channel_id = calculate_channel_identifier(access_address);
@@ -686,7 +683,7 @@ fn error_by_wait_imperfect<R: RngCore + Send + Sync>(params: SimulationParameter
                     channel = (rng.next_u32() as u8) % 37;
                 }
                 let mut access_address = rng.next_u32();
-                while !is_valid_aa(access_address, jambler::jambler::BlePhy::Uncoded1M) {
+                while !is_valid_aa(access_address, BlePhy::Uncoded1M) {
                     access_address = rng.next_u32();
                 }
                 let channel_id = calculate_channel_identifier(access_address);

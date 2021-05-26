@@ -1,5 +1,4 @@
 use itertools::Itertools;
-use jambler::jambler::BlePhy;
 use plotters::prelude::*;
 use rand::{Rng, seq::SliceRandom};
 use rand::{RngCore, SeedableRng};
@@ -12,6 +11,7 @@ use statrs::{distribution::Univariate, statistics::Mean};
 use std::f64;
 use num::{Integer, integer::{binomial, gcd}};
 
+use crate::csa2::BlePhy;
 use crate::{SimulationParameters, Task, run_tasks, tasks::BleConnection};
 
 
