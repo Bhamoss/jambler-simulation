@@ -29,7 +29,8 @@ statrs = "0.13.0"
 indicatif = "0.16.0"
 num = "0.4.0"
 
-#[dependencies.jambler]
+[dependencies.jambler]
+path = "../jambler"
 #git = "ssh://git@github.com/Bhamoss/jambler.git"
 #branch = "main"
 
@@ -39,3 +40,6 @@ clap_generate = {git = "https://github.com/clap-rs/clap", version="3.0.0-beta.2"
 
 [profile.release]
 debug = true
+
+#[target.armv7-unknown-linux-gnueabihf]
+#image = "mine:v1"

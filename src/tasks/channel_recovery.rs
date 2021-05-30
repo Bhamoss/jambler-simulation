@@ -5,6 +5,7 @@ use rand::{Rng, seq::SliceRandom};
 use rand::{RngCore, SeedableRng};
 use rand_chacha::ChaCha20Rng;
 use rayon::prelude::*;
+use std::io::Write;
 use std::{fs::{create_dir_all, File}};
 
 use statrs::distribution::{Binomial, Discrete, Geometric};
@@ -930,7 +931,7 @@ fn with_capture_chance<R: RngCore + Send + Sync>(params: SimulationParameters<R>
 
 fn chm_sim<R: RngCore + Send + Sync>(params: SimulationParameters<R>, _bars: Arc<Mutex<MultiProgress>>)  {
 
-    const NUMBER_SIMS : u32 = 500;
+    const NUMBER_SIMS : u32 = 100;
 
     let mut file_path = params.output_dir;
     let mut rng = params.rng;
@@ -957,9 +958,9 @@ fn chm_sim<R: RngCore + Send + Sync>(params: SimulationParameters<R>, _bars: Arc
 
 
 
-    let max_bfs_feasable = vec![100, 500];
-    let max_error_rates = vec![0.1, 0.3];
-    let physical_error_rates = vec![0.1, 0.5];
+    let max_bfs_feasable = vec![100];
+    let max_error_rates = vec![0.05];
+    let physical_error_rates = vec![0.3];
 
     //let nt = NUMBER_SIMS as usize * 36 * max_bfs_feasable.len() * max_error_rates.len() * physical_error_rates.len();
 
@@ -1020,7 +1021,7 @@ fn chm_sim<R: RngCore + Send + Sync>(params: SimulationParameters<R>, _bars: Arc
 
             //println!("Simulating {} bfs {:.2} err {:.} pl with {} events and {:.2} thress",  bfs_max, max_error, packet_loss, events, thress);
 
-            // simulate for every possible real used
+            // simulate for every possible real used (2u8..=37)
             let sims = (2u8..=37).map(|i| (i, ChaCha20Rng::seed_from_u64(rng.next_u64()))).collect_vec();
             // Contains (actual_nb_used, vec over simulation with ((success, not no_solution), nb_bfs, extra_packets after channel map))
             let sims = sims.into_par_iter().map(|(nb_used, mut rng)|{
@@ -1400,6 +1401,7 @@ fn geo_qdf(p: f64, wanted_probability : f64) -> u32 {
     raw.ceil() as u32 
 }
 
+#[allow(clippy::logic_bug)]
 #[allow(clippy::too_many_arguments)]
 fn brute_force(_extra_packets: u32 ,_bf_max: u64,actual_nb_used_debug :u8, actual_chm_debug : u64, actual_counter_debug : u16, packets : &[(u16, u8)], chm : u64, thresshold: f64, nb_events: u8, packet_loss: f64, channel_id: u16) -> (CounterInterval, u32) {
     //if actual_nb_used_debug == 37 { println!("bf for {} {} {}", actual_nb_used_debug, actual_counter_debug, actual_chm_debug)};
@@ -1424,7 +1426,8 @@ fn brute_force(_extra_packets: u32 ,_bf_max: u64,actual_nb_used_debug :u8, actua
         generate_channel_map_arrays(chm);
     let unused_channels = channel_map_bool_array.iter().enumerate().filter_map(|(channel, seen)| if !*seen {Some(channel as u8)} else {None}).collect_vec();
     let mut nb_bfs = 0u32;
-    let result = likely_false_negatives.into_iter().map(|nb_false_negs| {
+    let mut nb_exactly_one = 0u32;
+    let result = likely_false_negatives.clone().into_iter().map(|nb_false_negs| {
         
         //let nb_used = 37 - nb_unused_seen + nb_false_negs;
         //let mut is_false_neg = unused_channels.iter().map(|_| false).collect_vec();
@@ -1518,7 +1521,10 @@ fn brute_force(_extra_packets: u32 ,_bf_max: u64,actual_nb_used_debug :u8, actua
         //.collect_vec();
         //(nb_false_negs, fn_solutions)
     })//.collect_vec();
-    .flatten().inspect(|_| nb_bfs += 1).reduce(|a,b| { // IMPORTANT if 1 element this will give the 1 element => one solution stays one solution
+    .flatten()
+    .inspect(|_| nb_bfs += 1)
+    .inspect(|r| if let  CounterInterval::ExactlyOneSolution(_,_,_) = r {nb_exactly_one += 1})
+    .reduce(|a,b| { // IMPORTANT if 1 element this will give the 1 element => one solution stays one solution
         match a {
             CounterInterval::ExactlyOneSolution(ac, am, atodo) => {
                 match b {
@@ -1546,6 +1552,32 @@ fn brute_force(_extra_packets: u32 ,_bf_max: u64,actual_nb_used_debug :u8, actua
         }
     }).unwrap();
 
+    // for jambler test -> farm an interesting case that would lead to success
+    if let CounterInterval::ExactlyOneSolution(c, chm, to) = &result
+    {
+        let b = 
+            actual_counter_debug == *c && 
+            (actual_chm_debug ^ *chm) & !*to == 0 &&
+            actual_nb_used_debug  == 28 &&
+            likely_false_negatives.len() >= 2 &&
+            nb_exactly_one > 30 &&
+            false; // TODO verwijder false om data te krijgen
+        if b
+            {
+            println!("
+let channel_id : u16 = {};
+let seen_channel_map : u64 = {};
+let threshold : f32 = {};
+let nb_events : u16 = {};
+let packet_loss : f32 = {};
+let nb_used : u8 = {};
+let packets : Vec<(u16, u8)> = vec!{:?};
+let result : CounterInterval = {:?};",
+                channel_id, chm, thresshold, nb_events, packet_loss, actual_nb_used_debug, packets, result);
+            std::io::stdout().flush().unwrap();
+            panic!("");
+        }
+    }
     (result, nb_bfs)
 }
 #[derive(Clone, Copy, PartialEq, Debug)]

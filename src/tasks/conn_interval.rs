@@ -1079,7 +1079,7 @@ fn conn_interval_sim<R: RngCore + Send + Sync>(params: SimulationParameters<R>, 
     file_path.push("conn_interval_sim.png");
 
 
-    const NUMBER_SIMS : u32 = 1000;
+    const NUMBER_SIMS : u32 = 10;
     const SUCCESS_RATE: f64 = 0.91;
     const STEP : usize = 20;
 
@@ -1088,7 +1088,7 @@ fn conn_interval_sim<R: RngCore + Send + Sync>(params: SimulationParameters<R>, 
     let gcd_thress_nb_durations = geo_qdf(1.0/2.0, SUCCESS_RATE) + 2;
     //println!("{} gcd thres", gcd_thress_nb_durations - 2);
 
-    let capture_chances = vec![0.2f64, 0.1f64, 0.02f64];
+    let capture_chances = vec![0.2f64];//, 0.1f64, 0.02f64];
 
 
     File::create(file_path.clone()).expect("Failed to create plot file");
@@ -1158,6 +1158,9 @@ fn conn_interval_sim<R: RngCore + Send + Sync>(params: SimulationParameters<R>, 
                                 if conn_int < connection.connection_interval { //|| conn_int != conn_interval {
                                     panic!("GCD candidates had wrong rounding")
                                 }
+                                if conn_interval == conn_int && conn_interval == 57500 {
+                                    println!("let conn_interval : u32 = {};\nlet capture_chance : f32 = {};\nlet nb_packets_first_single_interval : u32 = {} + 1;\nlet nb_durations_gcd_thres : u32 = {};\nlet durations : Vec<u32> = vec!{:?};\n\n", conn_interval, capture_chance, necessary_nb_packets, gcd_thress_nb_durations, durations);
+                                }
                                 return (conn_interval == conn_int, conn_int, connection.cur_time - connection.start_time, true)
                             }
                         }
@@ -1168,6 +1171,9 @@ fn conn_interval_sim<R: RngCore + Send + Sync>(params: SimulationParameters<R>, 
                             let mod_1250 = smallest % 1250;
                             let conn_int = if mod_1250 < 625 {smallest - mod_1250} else {smallest + 1250 - mod_1250} as u32;
                             // Take it as the conn_interval
+                            if conn_interval == conn_int && conn_interval == 2507500 {
+                                println!("let conn_interval : u32 = {};\nlet capture_chance : f32 = {};\nlet nb_packets_first_single_interval : u32 = {}+1;\nlet nb_durations_gcd_thres : u32 = {};\nlet durations : Vec<u32> = vec!{:?};\n\n", conn_interval, capture_chance, necessary_nb_packets, gcd_thress_nb_durations, durations);
+                            }
                             return (conn_interval == conn_int, conn_int, connection.cur_time - connection.start_time, false)
                         }
                     }

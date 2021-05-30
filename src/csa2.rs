@@ -564,7 +564,8 @@ mod tests {
 }
 
 
-
+pub use jambler::jambler::BlePhy;
+/*
 #[derive(Clone, Copy, PartialEq)]
 pub enum BlePhy {
     Uncoded1M,
@@ -597,3 +598,4 @@ impl core::fmt::Debug for BlePhy {
         write!(f, "{}", self)
     }
 }
+*/

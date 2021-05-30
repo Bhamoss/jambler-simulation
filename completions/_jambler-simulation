@@ -15,8 +15,8 @@ _jambler-simulation() {
 
     local context curcontext="$curcontext" state line
     _arguments "${_arguments_options[@]}" \
-'-t+[Which tasks to run]: :(all channel-occurrences channel-recovery connection-interval)' \
-'--task=[Which tasks to run]: :(all channel-occurrences channel-recovery connection-interval)' \
+'-t+[Which tasks to run]: :(all channel-occurrences channel-recovery connection-interval full)' \
+'--task=[Which tasks to run]: :(all channel-occurrences channel-recovery connection-interval full)' \
 '-o+[Output directory]' \
 '--output-dir=[Output directory]' \
 '-s+[The positive seed for the simulations. Random seed if not given]' \

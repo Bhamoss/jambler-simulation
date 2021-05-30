@@ -9,6 +9,8 @@ use crate::csa2::{BlePhy, calculate_channel_identifier, csa2_no_subevent, genera
 pub mod channel_occurrence;
 pub mod channel_recovery;
 pub mod conn_interval;
+pub mod full;
+
 
 pub struct BleConnection {
     pub channel_map: u64,

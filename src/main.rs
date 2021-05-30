@@ -10,7 +10,7 @@ use std::{fs::create_dir_all, path::PathBuf, sync::{Arc, Mutex}, thread, time::D
 use tasks::channel_occurrence::channel_occurrences;
 use indicatif::MultiProgress;
 
-use crate::tasks::{channel_recovery::channel_recovery, conn_interval::conn_interval};
+use crate::tasks::{channel_recovery::channel_recovery, conn_interval::conn_interval, full::full};
 
 fn get_rand(seed: Option<u64>) -> Box<dyn RngCore> {
     match seed {
@@ -112,7 +112,8 @@ fn main() {
                 vec![
                     Box::new(&channel_occurrences), 
                     Box::new(&channel_recovery), 
-                    Box::new(&conn_interval)
+                    Box::new(&conn_interval),
+                    Box::new(&full), 
                     ];
             run_tasks(tasks, params, progress);
         }
@@ -126,6 +127,9 @@ fn main() {
         }
         cli::SimTask::ConnectionInterval => {
             conn_interval(params, progress);
+        }
+        cli::SimTask::Full => {
+            full(params, progress);
         }
     }},
     || {
